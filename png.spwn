@@ -32,12 +32,6 @@ impl @chunk {
 		c_len = c_data[0:4].bytes_to_int()
 
 		c_type = c_data[4:8].bytes_to_str()
-		expect = @png::CHUNK_TYPES[num_key(index)]
-		//Check if that chunk has a valid chunk type
-		if c_type != expect {
-			_error("Error parsing PNG! (Invalid c_type -> expected {} got {})".fmt([expect, c_type]))
-		}
-
 		data = c_data[8:8+c_len]
 		crc = c_data[8+c_len:12+c_len].bytes_to_int()
 
@@ -56,13 +50,8 @@ type @png
 impl @png {
 	MAGIC_BYTES: [137, 80, 78, 71, 13, 10, 26, 10],
 
-	MAX_CHUNKS: 4,
-	CHUNK_TYPES: {
-		_0: "IHDR",
-		_1: "sRGB",
-		_2: "IDAT",
-		_3: "IEND"
-	},	
+	//The only chunks that are important to us
+	CHUNK_TYPES: ["IHDR", "IDAT"],
 
 	_validate_png: (data: [@number]) {
 		MAGIC_LENGTH = @png::MAGIC_BYTES.length
@@ -73,28 +62,38 @@ impl @png {
 	},
 
 	_get_chunks: (self) {
-		if self.c.length == @png::MAX_CHUNKS {
+		if self.c.length > 0 {
 			_error("Cannot read past end of PNG! (_get_chunks called more than once)")
 		}
 
 		//Skip the magic bytes since they were already checked
 		let p = @png::MAGIC_BYTES.length
+		let i = 0
 
-		for i in 0..@png::MAX_CHUNKS {
+		while true {
 			chunk_length = self.r[p : (p + 4)].bytes_to_int()
 
-			if chunk_length == 0 && i != 2 || i != 3 {
-				_error("Failed to parse PNG! (chunk 1 has length 0)")
+			if chunk_length == 0 && (i == 0 || i == 1) {
+				_error("Failed to parse PNG! (chunk {} has length 0)".fmt([i]))
 			}
 		
 			//Add 4 to skip the length of the chunk type data
 			chunk = @chunk::new(self.r[p : (p + 12 + chunk_length)], i)
 			p += (12 + chunk_length)
 
-			self.c.push(chunk)
+			if @png::CHUNK_TYPES.index(chunk.ctype) != null {
+				self.c.push(chunk)
+			}
+
+			if p >= self.r.length {
+				break
+			}
+
+			i++
 		}
 
 		//Clear the old data since it is in chunks now
+		self.r.clear()
 		self.r = null
 	},
 
@@ -108,6 +107,8 @@ impl @png {
 
 		self.w = width
 		self.h = height
+
+		$.print(self.c)
 	},
 
 	new: (data: [@number]) {
@@ -188,4 +189,4 @@ png_to_objects = (
 	}
 }
 
-parse_png("cafe.png")
+parse_png("test2.png")
