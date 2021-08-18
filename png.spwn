@@ -1,0 +1,191 @@
+ascii = import "ascii.spwn"
+
+PIXEL_OBJ_ID = null
+
+_error = (message) {
+	$.print("[ERROR]: " + message)
+	$.assert(false)
+}
+
+//Allows numbers (ish) as dictionary keys by prefixing them with an underscore
+num_key = (key: @number) {
+	return "_" + key as @string
+}
+
+
+impl @array {
+	//Takes array of bytes and converts them to an integer
+	bytes_to_int: (self) {
+		return self.reduce((acum, el) => (acum * 256) + el)
+	},
+
+	//Takes array of bytes and converts them to a string
+	bytes_to_str: (self) {
+		return "".join(self.map((i) => ascii.chr(i)))
+	}
+}
+
+
+type @chunk
+impl @chunk {
+	new: (c_data: [@number], index: @number) {
+		c_len = c_data[0:4].bytes_to_int()
+
+		c_type = c_data[4:8].bytes_to_str()
+		expect = @png::CHUNK_TYPES[num_key(index)]
+		//Check if that chunk has a valid chunk type
+		if c_type != expect {
+			_error("Error parsing PNG! (Invalid c_type -> expected {} got {})".fmt([expect, c_type]))
+		}
+
+		data = c_data[8:8+c_len]
+		crc = c_data[8+c_len:12+c_len].bytes_to_int()
+
+		return @chunk::{
+			index,
+			len: c_len,
+			ctype: c_type,
+			data,
+			crc,
+		}
+	},
+}
+
+
+type @png
+impl @png {
+	MAGIC_BYTES: [137, 80, 78, 71, 13, 10, 26, 10],
+
+	MAX_CHUNKS: 4,
+	CHUNK_TYPES: {
+		_0: "IHDR",
+		_1: "sRGB",
+		_2: "IDAT",
+		_3: "IEND"
+	},	
+
+	_validate_png: (data: [@number]) {
+		MAGIC_LENGTH = @png::MAGIC_BYTES.length
+
+		if @png::MAGIC_BYTES != data[0:MAGIC_LENGTH] {
+			_error("Invalid PNG file! (incorrect magic bytes)")
+		}
+	},
+
+	_get_chunks: (self) {
+		if self.c.length == @png::MAX_CHUNKS {
+			_error("Cannot read past end of PNG! (_get_chunks called more than once)")
+		}
+
+		//Skip the magic bytes since they were already checked
+		let p = @png::MAGIC_BYTES.length
+
+		for i in 0..@png::MAX_CHUNKS {
+			chunk_length = self.r[p : (p + 4)].bytes_to_int()
+
+			if chunk_length == 0 && i != 2 || i != 3 {
+				_error("Failed to parse PNG! (chunk 1 has length 0)")
+			}
+		
+			//Add 4 to skip the length of the chunk type data
+			chunk = @chunk::new(self.r[p : (p + 12 + chunk_length)], i)
+			p += (12 + chunk_length)
+
+			self.c.push(chunk)
+		}
+
+		//Clear the old data since it is in chunks now
+		self.r = null
+	},
+
+	_parse: (self) {
+		self._get_chunks()
+
+		chunk_zero = self.c[0]
+
+		width = chunk_zero.data[0:4].bytes_to_int()
+		height = chunk_zero.data[4:8].bytes_to_int()
+
+		self.w = width
+		self.h = height
+	},
+
+	new: (data: [@number]) {
+		@png::_validate_png(data)
+
+		return @png::{
+			//width, height
+			w: null,
+			h: null,
+			//r for raw
+			r: data,
+			//c for chunks
+			c: [],
+		}
+	}
+}
+
+
+//Reads and parses the png file
+parse_png = (
+	#[desc("Path to the file")]
+	file,
+) {
+    data = $.readfile(file, "bin")
+
+	let png = @png::new(data)
+	png._parse()
+
+	return png
+}
+
+
+
+png_to_objects = (
+	#[desc("Starting x offset for the pixels. Default is +10 (from 0,0)")]
+	start_x = 10,
+	#[desc("Starting y offset for the pixels. Default is +100 (from 0,0)")]
+	start_y = 100,
+
+	#[desc("Starting group for the objects. Default is 1")]
+	start_group = 1,
+	#[desc("Enables/Disables adding groups to all the pixels. Default is false")]
+	add_groups = false,
+	#[desc("The function that generates the group value")]
+	group_factory = null,
+
+	#[desc("Instead of using 1 unique colour for every pixel, use 1 colour and hue shift to get the right colour. Default is false")]
+	use_hue_shift = false,
+	#[desc("Starting hue offset. Default is 0")]
+	hue_offset = 0,
+
+	#[desc("The size of the individual pixels. Default is 1")]
+	pixel_scale = 1,
+	#[desc("The number of pixels placed per pixel in the image (n:1). Default is 1")]
+	pixel_density = 1,
+
+	#[desc("Enables/Disables glow on the pixels. Default is false")]
+	show_glow = false,
+) {
+	//Validation for the arguments
+	if start_x <= 0 {
+		_error("start_x must be greater than 0!")
+	}
+	if start_y <= 0 {
+		_error("start_y must be greater than 0!")
+	}
+
+	if start_group <= 0 {
+		_error("start_group must be greater than 0!")
+	}
+
+	if hue_offset < 0 || hue_offset > 180 {
+		_error("hue_offset must be between 0 and 180!")
+	}
+
+	if pixel_scale < 0.1 || pixel_scale > 4 {
+		_error("pixel_scale must be between 0.1 and 4!")
+	}
+}
+
+parse_png("cafe.png")
