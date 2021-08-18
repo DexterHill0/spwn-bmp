@@ -73,8 +73,8 @@ impl @png {
 		while true {
 			chunk_length = self.r[p : (p + 4)].bytes_to_int()
 
-			if chunk_length == 0 && (i == 0 || i == 1) {
-				_error("Failed to parse PNG! (chunk {} has length 0)".fmt([i]))
+			if chunk_length == 0 {
+				_error("Failed to parse PNG! (chunk has length 0)")
 			}
 		
 			//Add 4 to skip the length of the chunk type data
@@ -107,8 +107,6 @@ impl @png {
 
 		self.w = width
 		self.h = height
-
-		$.print(self.c)
 	},
 
 	new: (data: [@number]) {
