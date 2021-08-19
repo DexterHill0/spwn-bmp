@@ -1,4 +1,4 @@
-ascii = import "ascii.spwn"
+extract import "ascii.spwn"
 
 type @data
 impl @data {
@@ -10,6 +10,10 @@ impl @data {
 
 	move: (self, pos: @number) {
 		self.p += pos
+	},
+
+	reset: (self) {
+		self.p = 0
 	},
 
 	raw: (self) {
@@ -28,55 +32,6 @@ impl @data {
 	}
 }
 
-//enum-ish thingy
-//uses the range operator (..) to allow "indexing" of the enum
-type @enum
-impl @enum {
-
-	_range_: (self, text) {
-		if text == null {
-			return
-		}
-
-		if $.matches(text, @string) {
-			//Have to loop through the values since .values() will return the values in a random order each time.
-			for k in self.e.keys() {
-				if self.e[k] == text {
-					return k.l_trim(["_"]) as @number;
-				}
-			}
-		}
-		else {
-			return self.e["_{}".fmt([text])]
-		}
-	},
-
-	_has_: (self, other: @number) {
-		if other == null {
-			return false
-		}
-
-		return self.e.keys().index("_{}".fmt([other])) != null
-	},
-
-	new: (values, nums = []) {
-		let e = {}
-
-		for i in 0..values.length {
-			if nums.length > 0 {
-				e.set("_{}".fmt([nums[i]]), values[i])
-			}
-			else {
-				e.set("_{}".fmt([i]), values[i])
-			}
-		}
-
-		return @enum::{
-			e,
-		}
-	}
-}
-
 impl @array {
 	//Takes array of bytes and converts them to an integer
 	bytes_to_int: (self) {
@@ -85,11 +40,11 @@ impl @array {
 
 	//Takes array of bytes and converts them to a string
 	bytes_to_str: (self) {
-		return "".join(self.map((i) => ascii.chr(i)))
-	}
+		return "".join(self.map((i) => chr(i)))
+	},
+	
 }
 
 return {
-	enum: @enum,
 	data: @data,
 }

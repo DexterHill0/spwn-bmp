@@ -1,0 +1,182 @@
+extract import "utils.spwn"
+
+PIXEL_OBJ_ID = null
+
+_error = (message) {
+	throw "[ERROR]: {}".fmt([message])
+}
+
+type @colour_sec
+impl @colour_sec {
+
+	MODES: {
+		//The valid bit depths for each mode
+		INDEXED: [1, 4, 8],
+		TRUE_COL: [16, 24, 32]
+	},
+	
+	new: (mode: @number, pix_off: @number, data: @data) {
+		let data = data
+
+		let col_indexes = null
+		let pixels = null
+
+		//TODO: check why data is not properly read
+
+		if @colour_sec::MODES.INDEXED has mode {
+			//Get the length of the colour palette index thingy
+			index_length = data.raw().length - pix_off
+
+			col_indexes = data.read(index_length)
+			pixels = data.read(pix_off)
+		}
+		else if @colour_sec::MODES.TRUE_COL has mode {
+			pixels = data.read(pix_off)
+		}
+		else {
+			_error("Error parsing BMP (invalid bit depth {})".fmt([mode]))
+		}
+
+		return @colour_sec::{
+			mode: mode,
+			pal: col_indexes,
+			pix: pixels,
+		}
+	}
+}
+
+type @bmp
+impl @bmp {
+	HEADER_BYTES: [66, 77],
+
+	SECTIONS: {
+		FHDR: 14,
+		IHDR: 40,
+	},
+
+	_validate_bmp: (self) {
+		HEADER_LENGTH = @bmp::HEADER_BYTES.length
+
+		if @bmp::HEADER_BYTES != self.raw.read(HEADER_LENGTH).raw() {
+			_error("Invalid BMP file! (incorrect file header)")
+		}
+
+		self.raw.move(-HEADER_LENGTH)
+	},
+
+	_parse: (self) {
+		self._validate_bmp()
+		
+		let file_header = self.raw.read(@bmp::SECTIONS.FHDR)
+		//Skips unimportant data
+		file_header.move(10)
+
+		p_off = file_header.read(4).raw()[0]
+
+		let info_header = self.raw.read(@bmp::SECTIONS.IHDR)
+		//Skips byte that indicates size of section
+		info_header.move(4)
+
+		w = info_header.read(4).raw()[0]
+		h = info_header.read(4).raw()[0]
+
+		//Skips `biPlane`
+		info_header.move(2)
+
+		depth = info_header.read(2).raw()[0]
+		comp = info_header.read(4).raw()[0]
+
+		self.inf = {
+			w,
+			h,
+		}
+
+		self.col = @colour_sec::new(depth, p_off, self.raw.read(self.raw.raw().length))
+
+		$.print(self.col)
+
+		self.raw = null
+	},
+
+	new: (data: @data) {
+
+		return @bmp::{
+			inf: {
+				w: null,
+				h: null,
+			},
+			col: null,
+			raw: data
+		}
+	}
+}
+
+
+//Reads and parses the bmp file
+parse_bmp = (
+	#[desc("Path to the file")]
+	file,
+) {
+    let data = @data::new($.readfile(file, "bin"))
+
+	let bmp = @bmp::new(data)
+	bmp._parse()
+
+	return bmp
+}
+
+
+
+bmp_to_objects = (
+	#[desc("Starting x offset for the pixels. Default is 5 block (from 0,0)")]
+	start_x = 10,
+	#[desc("Starting y offset for the pixels. Default is 50 blocks (from 0,0)")]
+	start_y = 100,
+
+	#[desc("Starting group for the objects. Default is 1")]
+	start_group = 1,
+	#[desc("Enables/Disables adding groups to all the pixels. Default is false")]
+	add_groups = false,
+	#[desc("The function that generates the group value")]
+	group_factory = null,
+
+	#[desc("Instead of using 1 unique colour for every pixel, use 1 colour and hue shift to get the right colour. Default is false")]
+	use_hue_shift = false,
+	#[desc("Starting hue offset. Default is 0")]
+	hue_offset = 0,
+
+	#[desc("The size of the individual pixels. Default is 1")]
+	pixel_scale = 1,
+	#[desc("The number of pixels placed per pixel in the image (n:1). Default is 1")]
+	pixel_density = 1,
+
+	#[desc("Enables/Disables glow on the pixels. Default is false")]
+	show_glow = false,
+) {
+	//Validation for the arguments
+	if start_x <= 0 {
+		_error("start_x must be greater than 0!")
+	}
+	if start_y <= 0 {
+		_error("start_y must be greater than 0!")
+	}
+
+	if start_group <= 0 {
+		_error("start_group must be greater than 0!")
+	}
+
+	if hue_offset < 0 || hue_offset > 180 {
+		_error("hue_offset must be between 0 and 180!")
+	}
+
+	if pixel_scale < 0.1 || pixel_scale > 4 {
+		_error("pixel_scale must be between 0.1 and 4!")
+	}
+}
+
+// 1.bmp = average bmp (true colour)
+// 2.bmp = indexed colour bmp
+//
+
+
+parse_bmp("1.bmp")

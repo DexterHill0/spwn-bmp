@@ -1,4 +1,4 @@
 (WIP)
 
-# spwn-png
- PNG to objects using SPWN
+# spwn-bmp
+ BMP to objects using SPWN
