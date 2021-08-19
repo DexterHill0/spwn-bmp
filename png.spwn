@@ -1,40 +1,29 @@
-ascii = import "ascii.spwn"
+extract import "utils.spwn"
 
 PIXEL_OBJ_ID = null
 
 _error = (message) {
-	$.print("[ERROR]: " + message)
-	$.assert(false)
-}
-
-//Allows numbers (ish) as dictionary keys by prefixing them with an underscore
-num_key = (key: @number) {
-	return "_" + key as @string
-}
-
-
-impl @array {
-	//Takes array of bytes and converts them to an integer
-	bytes_to_int: (self) {
-		return self.reduce((acum, el) => (acum * 256) + el)
-	},
-
-	//Takes array of bytes and converts them to a string
-	bytes_to_str: (self) {
-		return "".join(self.map((i) => ascii.chr(i)))
-	}
+	throw "[ERROR]: {}".fmt([message])
 }
 
 
 type @chunk
 impl @chunk {
-	new: (c_data: [@number], index: @number) {
-		c_len = c_data[0:4].bytes_to_int()
+	new: (c_data: @data, index: @number) {
+		let rdata = c_data
 
-		c_type = c_data[4:8].bytes_to_str()
-		data = c_data[8:8+c_len]
-		crc = c_data[8+c_len:12+c_len].bytes_to_int()
+		c_len = rdata.read(4).raw().bytes_to_int()
 
+		let c_type = null
+		let data = null
+		let crc = null
+
+		if c_len > 0 {
+			c_type = rdata.read(4).raw().bytes_to_str()
+			data = rdata.read(c_len)
+			crc = rdata.read(4).raw().bytes_to_int()
+		}
+		
 		return @chunk::{
 			index,
 			len: c_len,
@@ -45,47 +34,75 @@ impl @chunk {
 	},
 }
 
+type @colour
+impl @colour {
+	COLOUR_MODES: @enum::new(
+		["GRAYSCALE", "RGB", "PLTE", "GRAYSCALE_A", "RGB_A"], 
+		[0, 2, 3, 4, 6]
+	),
+
+	BIT_DEPTHS: {
+		GRAYSCALE: [1, 2, 4, 8, 16],
+		RGB: [8, 16],
+		PLTE: [1, 2, 4, 8],
+		GRAYSCALE_A: [8, 16],
+		RGB_A: [8, 16]
+	},
+
+	new: (mode: @number, bit_depth: @number) {
+		if !(@colour::COLOUR_MODES has mode) {
+			_error("Error parsing PNG (invalid colour mode: {})".fmt([mode]))
+		}
+
+		colour_mode = @colour::COLOUR_MODES..mode
+
+		if @colour::BIT_DEPTHS[colour_mode].index(bit_depth) == null {
+			_error("Error parsing PNG (invalid bit depth {} for colour {})".fmt([bit_depth, colour_mode]))
+		}
+
+		return @colour::{
+			mode,
+			depth: bit_depth,
+		}
+	}
+}
 
 type @png
 impl @png {
 	MAGIC_BYTES: [137, 80, 78, 71, 13, 10, 26, 10],
 
 	//The only chunks that are important to us
-	CHUNK_TYPES: ["IHDR", "IDAT"],
+	CHUNK_TYPES: @enum::new(["IDAT", "IHDR"]),
 
-	_validate_png: (data: [@number]) {
+	_validate_png: (self) {
 		MAGIC_LENGTH = @png::MAGIC_BYTES.length
 
-		if @png::MAGIC_BYTES != data[0:MAGIC_LENGTH] {
+		if @png::MAGIC_BYTES != self.raw.read(MAGIC_LENGTH).raw() {
 			_error("Invalid PNG file! (incorrect magic bytes)")
 		}
 	},
 
 	_get_chunks: (self) {
-		if self.c.length > 0 {
+		if self.chunks.length > 0 {
 			_error("Cannot read past end of PNG! (_get_chunks called more than once)")
 		}
 
 		//Skip the magic bytes since they were already checked
-		let p = @png::MAGIC_BYTES.length
 		let i = 0
 
 		while true {
-			chunk_length = self.r[p : (p + 4)].bytes_to_int()
-
-			if chunk_length == 0 {
-				_error("Failed to parse PNG! (chunk has length 0)")
-			}
+			chunk_length = self.raw.read(4).raw().bytes_to_int()
+			//Move back 4 to cancel out that read
+			self.raw.move(-4)
 		
 			//Add 4 to skip the length of the chunk type data
-			chunk = @chunk::new(self.r[p : (p + 12 + chunk_length)], i)
-			p += (12 + chunk_length)
+			chunk = @chunk::new(self.raw.read(12 + chunk_length), i)
 
-			if @png::CHUNK_TYPES.index(chunk.ctype) != null {
-				self.c.push(chunk)
+			if @png::CHUNK_TYPES..chunk.ctype != null {
+				self.chunks.push(chunk)
 			}
 
-			if p >= self.r.length {
+			if self.raw.is_eof() {
 				break
 			}
 
@@ -93,33 +110,49 @@ impl @png {
 		}
 
 		//Clear the old data since it is in chunks now
-		self.r.clear()
-		self.r = null
+		self.raw = null
 	},
 
 	_parse: (self) {
+		self._validate_png()
 		self._get_chunks()
 
-		chunk_zero = self.c[0]
+		let chunk_zero = self.chunks[0]
 
-		width = chunk_zero.data[0:4].bytes_to_int()
-		height = chunk_zero.data[4:8].bytes_to_int()
+		width = chunk_zero.data.read(4).raw().bytes_to_int()
+		height = chunk_zero.data.read(4).raw().bytes_to_int()
 
-		self.w = width
-		self.h = height
+		if width == 0 || height == 0 {
+			_error("Error parsing PNG! (width &/ height must be greater than 0)")
+		}
+
+		self.hdr.w = width
+		self.hdr.h = height
+
+		//Skip bit depth for now - might need later though
+		bit_depth = chunk_zero.data.read(1).raw()[0]
+
+		colour_type = @colour::new(chunk_zero.data.read(1).raw()[0], bit_depth)
+		compr_method = chunk_zero.data.read(1).raw()[0]
+
+		self.hdr.col = colour_type
+
+		//TODO: IDAT (de)compression algorithm
 	},
 
-	new: (data: [@number]) {
-		@png::_validate_png(data)
-
+	new: (data: @data) {
 		return @png::{
-			//width, height
-			w: null,
-			h: null,
-			//r for raw
-			r: data,
+			//hdr for header
+			hdr: {
+				//width, height
+				w: null,
+				h: null,
+				col: null,
+				comp: null,
+			},
+			raw: data,
 			//c for chunks
-			c: [],
+			chunks: [],
 		}
 	}
 }
@@ -130,7 +163,7 @@ parse_png = (
 	#[desc("Path to the file")]
 	file,
 ) {
-    data = $.readfile(file, "bin")
+    let data = @data::new($.readfile(file, "bin"))
 
 	let png = @png::new(data)
 	png._parse()
@@ -187,4 +220,4 @@ png_to_objects = (
 	}
 }
 
-parse_png("test2.png")
+parse_png("test.png")
