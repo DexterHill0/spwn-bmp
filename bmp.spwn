@@ -73,6 +73,7 @@ impl @bmp_ihdr {
 	], [32, 24, 16]),
 
 	MASK_MODES: {
+		// -> _<bitCount>_<SUPPORTED-arrayIndex>
 		_32_0: "BGRX",
 		_32_1: "XBGR",
 		_32_2: "RGBA",
@@ -90,6 +91,10 @@ impl @bmp_ihdr {
 
 		size = data.read(4).raw().bytes_to_int()
 
+		//Oops >.<
+		let biWidth = null; let biHeight = null; let biPlanes = null; let biBitCount = null; let biCompression = null; let biPalettePadding = null;
+		let biYFlip = null; let biDirection = null; let biImageSize = null; let biPixPerMeter = null; let biColors = null; let biDpi = [];
+
 		//IBM OS/2 Bitmap v1
 		if size == 12 {
 			let info_header = data.read(size - 4)
@@ -101,23 +106,18 @@ impl @bmp_ihdr {
 			biCompression = @bmp::COMPRESSIONS.."RAW"
 			biPalettePadding = 3
 
-			return @bmp_fhdr::{
-				size,
-				biWidth,
-				biHeight,
-				biPlanes,
-				biBitCount,
-				biCompression,
-				biPalettePadding,
-			}
-
 		}
 		//Windows Bitmap v2 to v5
 		else if [40, 64, 108, 124] has size {
 			let info_header = data.read(size - 4)
 
+			biYFlip = (info_header.raw()[7] == 255)
+			biDirection = 1 if biYFlip else -1
+
 			biWidth = info_header.read(4).raw().bytes_to_int()
 			biHeight = info_header.read(4).raw().bytes_to_int()
+			biHeight = biHeight if !biYFlip else 2 ** 32 - biHeight
+
 			biPlanes = info_header.read(2).raw().bytes_to_int()
 			biBitCount = info_header.read(2).raw().bytes_to_int()
 			biCompression = info_header.read(4).raw().bytes_to_int()
@@ -128,110 +128,114 @@ impl @bmp_ihdr {
 			]
 
 			biColors = info_header.read(4).raw().bytes_to_int()
-			biColors = biColors if biColors != 0 else 1.s_left(biBitCount)
-
 			biPalettePadding = 4
-			let biDpi = []
-
-			let masks = {}
-			let biRGBMask = []
-			let biRGBAMask = []
 
 			for m in biPixPerMeter {
 				biDpi.push($.floor(m / 39.3701 + 0.5))
-			}
-
-			if @bmp_ihdr::COMPRESSIONS.."BITFIELDS" == biCompression {
-				_m = ["r_mask", "g_mask", "b_mask", "a_mask"]
-				if size >= 52 {
-					for i in 0.._m.length {
-						masks.set(_m[i], info_header.read(36 + i * 4).raw().bytes_to_int())
-					}
-				} 
-				else {
-					masks["a_mask"] = 0
-					
-					//Leave out a_mask
-					for m in _m[0:3] {
-						val = data.read(4)
-						masks.set(m, val.raw().bytes_to_int())
-					}
-				}
-
-				biRGBAMask = [
-					masks["r_mask"],
-					masks["g_mask"],
-					masks["b_mask"],
-					masks["a_mask"],
-				]
-				biRGBMask = [
-					masks["r_mask"],
-					masks["g_mask"],
-					masks["b_mask"],
-				]
-			}
-
-			mask_key = (bit, ind) {
-				return "_{}_{}".fmt([bit, ind])
-			}
-
-			modes = @bmp_ihdr::BIT2MODE..biBitCount
-			let biMode = modes[0]
-			let raw_mode = modes[1]
-			
-			if @bmp_ihdr::COMPRESSIONS.."BITFIELDS" == biCompression {
-				if @bmp_ihdr::SUPPORTED has biBitCount {
-					if biBitCount == 32 && ((@bmp_ihdr::SUPPORTED..biBitCount) has biRGBAMask) {
-						raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBAMask))]
-						biMode = "RGBA" if raw_mode has "A" else biMode
-					}
-					else if [24, 16] has biBitCount && ((@bmp_ihdr::SUPPORTED..biBitCount) has biRGBMask) {
-						raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBMask))]
-					}
-					else {
-						_error("Error parsing BMP! (uknown bitfields layout)")
-					}
-				}
-				else {
-					_error("Error parsing BMP! (uknown bitfields layout)")
-				}
-			}
-			else if @bmp_ihdr::COMPRESSIONS.."RAW" == biCompression {
-				// According to PIL this branch checks a variable called "header" to see if it is `22`
-				// but "header" is never provided as an argument to the func so I dont think this branch ever executes
-				// https://github.com/python-pillow/Pillow/blob/fb0aad5abdab9027cf8f02082ca4dab921692b79/src/PIL/BmpImagePlugin.py#L207
-			}
-			else {
-				_error("Error parsing BMP! (uknown compression type {})".fmt([biCompression]))
-			}
-
-			return @bmp_fhdr::{
-				size,
-				biWidth,
-				biHeight,
-				biPlanes,
-				biBitCount,
-				biCompression,
-				biImageSize,
-				biPixPerMeter,
-				biColors,
-				biPalettePadding,
-				biDpi,
-				biRGBMask,
-				biRGBAMask,
-				biMode
 			}
 
 		}
 		else {
 			_error("Error parsing BMP! (unknown header type {})".fmt([size]))
 		}
+
+		biColors = biColors if biColors != 0 else 1.s_left(biBitCount)
+		
+		let masks = {}
+		let biRGBMask = []
+		let biRGBAMask = []
+
+		if @bmp_ihdr::COMPRESSIONS.."BITFIELDS" == biCompression {
+			_m = ["r_mask", "g_mask", "b_mask", "a_mask"]
+			if size >= 52 {
+				for i in 0.._m.length {
+					masks.set(_m[i], info_header.read(36 + i * 4).raw().bytes_to_int())
+				}
+			} 
+			else {
+				masks["a_mask"] = 0
+				
+				//Leave out a_mask
+				for m in _m[0:3] {
+					masks.set(m, data.read(4).raw().bytes_to_int())
+				}
+			}
+
+			biRGBAMask = [
+				masks["r_mask"],
+				masks["g_mask"],
+				masks["b_mask"],
+				masks["a_mask"],
+			]
+			biRGBMask = [
+				masks["r_mask"],
+				masks["g_mask"],
+				masks["b_mask"],
+			]
+		}
+
+		mask_key = (bit, ind) {
+			return "_{}_{}".fmt([bit, ind])
+		}
+
+		modes = @bmp_ihdr::BIT2MODE..biBitCount
+		let biMode = modes[0]
+		let raw_mode = modes[1]
+		
+		if @bmp_ihdr::COMPRESSIONS.."BITFIELDS" == biCompression {
+			if @bmp_ihdr::SUPPORTED has biBitCount {
+				if biBitCount == 32 && ((@bmp_ihdr::SUPPORTED..biBitCount) has biRGBAMask) {
+					raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBAMask))]
+					biMode = "RGBA" if raw_mode has "A" else biMode
+				}
+				else if [24, 16] has biBitCount && ((@bmp_ihdr::SUPPORTED..biBitCount) has biRGBMask) {
+					raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBMask))]
+				}
+				else {
+					_error("Error parsing BMP! (uknown bitfields layout)")
+				}
+			}
+			else {
+				_error("Error parsing BMP! (uknown bitfields layout)")
+			}
+		}
+		else if @bmp_ihdr::COMPRESSIONS.."RAW" == biCompression {
+			// According to PIL this branch checks a variable called "header" to see if it is `22`
+			// but "header" is never provided as an argument to the func so I dont think this branch ever executes
+			// https://github.com/python-pillow/Pillow/blob/fb0aad5abdab9027cf8f02082ca4dab921692b79/src/PIL/BmpImagePlugin.py#L207
+		}
+		else {
+			_error("Error parsing BMP! (uknown compression type {})".fmt([biCompression]))
+		}
+
+		biTile = [
+			raw_mode,
+			data.p,
+			//TODO: proper binary AND
+
+			//((biWidth * biBitCount + 31).s_right(3)).b_and(-4),
+		]
+
+		return @bmp_fhdr::{
+			size,
+			biYFlip,
+			biDirection,
+			biWidth,
+			biHeight,
+			biPlanes,
+			biBitCount,
+			biCompression,
+			biImageSize,
+			biPixPerMeter,
+			biColors,
+			biPalettePadding,
+			biDpi,
+			biRGBMask,
+			biRGBAMask,
+			biMode,
+			biTile
+		}
 	}
-}
-
-type @palette
-impl @palette {
-
 }
 
 type @bmp_csec
@@ -290,8 +294,6 @@ impl @bmp {
 		self.ihdr = info_header
 
 		self.col = @bmp_csec::new(self.fhdr, self.ihdr, self.raw)
-
-		$.print(self.col)
 
 		self.raw = null
 	},
@@ -374,5 +376,4 @@ bmp_to_objects = (
 	}
 }
 
-
-parse_bmp("8bit.bmp")
+parse_bmp("24bit_top-bottom.bmp")
