@@ -12,10 +12,6 @@ impl @data {
 		self.p += pos
 	},
 
-	reset: (self) {
-		self.p = 0
-	},
-
 	raw: (self) {
 		return self.d
 	},
@@ -27,6 +23,7 @@ impl @data {
 	new: (data: [@number]) {
 		return @data::{
 			d: data,
+			length: data.length,
 			p: 0
 		}
 	}
@@ -35,7 +32,7 @@ impl @data {
 impl @array {
 	//Takes array of bytes and converts them to an integer
 	bytes_to_int: (self) {
-		return self.reduce((acum, el) => (acum * 256) + el)
+		return self.reverse().reduce((acum, el) => (acum * 256) + el)
 	},
 
 	//Takes array of bytes and converts them to a string

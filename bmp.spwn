@@ -6,8 +6,8 @@ _error = (message) {
 	throw "[ERROR]: {}".fmt([message])
 }
 
-type @colour_sec
-impl @colour_sec {
+type @bmp_csec
+impl @bmp_csec {
 
 	MODES: {
 		//The valid bit depths for each mode
@@ -18,82 +18,123 @@ impl @colour_sec {
 	new: (mode: @number, pix_off: @number, data: @data) {
 		let data = data
 
-		let col_indexes = null
+		let pal_cols = null
 		let pixels = null
 
-		//TODO: check why data is not properly read
-
-		if @colour_sec::MODES.INDEXED has mode {
+		if @bmp_csec::MODES.INDEXED has mode {
 			//Get the length of the colour palette index thingy
-			index_length = data.raw().length - pix_off
+			pal_index = data.length - pix_off
 
-			col_indexes = data.read(index_length)
+			pal_cols = data.read(pal_index)
 			pixels = data.read(pix_off)
 		}
-		else if @colour_sec::MODES.TRUE_COL has mode {
-			pixels = data.read(pix_off)
+		else if @bmp_csec::MODES.TRUE_COL has mode {
+			//Data is already the pixel data since there is no palette in true colour
+			pixels = data
 		}
 		else {
 			_error("Error parsing BMP (invalid bit depth {})".fmt([mode]))
 		}
 
-		return @colour_sec::{
+		return @bmp_csec::{
 			mode: mode,
-			pal: col_indexes,
+			pal: pal_cols,
 			pix: pixels,
+		}
+	}
+}
+
+//Moved into separate classes since it's just a bit neater
+type @bmp_fhdr
+impl @bmp_fhdr {
+	SIZE: 14,
+
+	new: (data: @data) {
+		let data = data
+
+		let file_header = data.read(@bmp_fhdr::SIZE)
+		
+		bfType = file_header.read(2).raw().bytes_to_str()
+		bfSize = file_header.read(4).raw().bytes_to_int()
+		
+		//Skip reserved
+		file_header.move(4)
+
+		bfOffBits = file_header.read(4).raw().bytes_to_int()
+
+		return @bmp_fhdr::{
+			size: @bmp_fhdr::SIZE,
+			bfType,
+			bfSize,
+			reserved1: 0,
+			reserved2: 0,
+			bfOffBits,
+		}
+	}
+}
+
+type @bmp_ihdr
+impl @bmp_ihdr {
+	new: (data: @data) {
+		let data = data
+
+		size = data.read(4).raw().bytes_to_int()
+
+		let info_header = data.read(size)
+		
+		biWidth = info_header.read(4).raw().bytes_to_int()
+		biHeight = info_header.read(4).raw().bytes_to_int()
+
+		//Skips `biPlanes`
+		info_header.move(2)
+
+		biBitCount = info_header.read(2).raw().bytes_to_int()
+		biCompression = info_header.read(4).raw().bytes_to_int()
+		biSizeImage = info_header.read(4).raw().bytes_to_int()
+
+		return @bmp_fhdr::{
+			size,
+			biWidth,
+			biHeight,
+			biPlanes: 1,
+			biBitCount,
+			biCompression,
+			biSizeImage,
 		}
 	}
 }
 
 type @bmp
 impl @bmp {
-	HEADER_BYTES: [66, 77],
+	HEADER: "BM",
 
-	SECTIONS: {
-		FHDR: 14,
-		IHDR: 40,
-	},
+	_parse: (self) {
+		file_header = @bmp_fhdr::new(self.raw)
+		self.raw.move(file_header.size)
 
-	_validate_bmp: (self) {
-		HEADER_LENGTH = @bmp::HEADER_BYTES.length
-
-		if @bmp::HEADER_BYTES != self.raw.read(HEADER_LENGTH).raw() {
+		if @bmp::HEADER != file_header.bfType {
 			_error("Invalid BMP file! (incorrect file header)")
 		}
 
-		self.raw.move(-HEADER_LENGTH)
-	},
-
-	_parse: (self) {
-		self._validate_bmp()
-		
-		let file_header = self.raw.read(@bmp::SECTIONS.FHDR)
-		//Skips unimportant data
-		file_header.move(10)
-
-		p_off = file_header.read(4).raw()[0]
-
-		let info_header = self.raw.read(@bmp::SECTIONS.IHDR)
-		//Skips byte that indicates size of section
-		info_header.move(4)
-
-		w = info_header.read(4).raw()[0]
-		h = info_header.read(4).raw()[0]
-
-		//Skips `biPlane`
-		info_header.move(2)
-
-		depth = info_header.read(2).raw()[0]
-		comp = info_header.read(4).raw()[0]
+		info_header = @bmp_ihdr::new(self.raw)
+		self.raw.move(info_header.size)
 
 		self.inf = {
-			w,
-			h,
+			w: info_header.biWidth,
+			h: info_header.biHeight,
 		}
 
-		self.col = @colour_sec::new(depth, p_off, self.raw.read(self.raw.raw().length))
+		//biSizeImage is used if the BMP is in true colour and it specifies the size of pixel data
+		//If the BMP is in indexed colour, the rest of the data is used
+		data_size = info_header.biSizeImage if info_header.biSizeImage > 0 else self.raw.length
 
-		$.print(self.col)
+		self.col = @bmp_csec::new(
+			info_header.biBitCount,
+			//bfOffBits (p_off) is relative to the start of the file so I need to subtract the length that I have already read
+			file_header.bfOffBits - file_header.size - info_header.size, 
+			self.raw.read(data_size)
+		)
+
 
 		self.raw = null
 	},
@@ -128,7 +169,7 @@ parse_bmp = (
 
 
 bmp_to_objects = (
-	#[desc("Starting x offset for the pixels. Default is 5 block (from 0,0)")]
+	#[desc("Starting x offset for the pixels. Default is 5 blocks (from 0,0)")]
 	start_x = 10,
 	#[desc("Starting y offset for the pixels. Default is 50 blocks (from 0,0)")]
 	start_y = 100,
@@ -137,7 +178,7 @@ bmp_to_objects = (
 	start_group = 1,
 	#[desc("Enables/Disables adding groups to all the pixels. Default is false")]
 	add_groups = false,
-	#[desc("The function that generates the group value")]
+	#[desc("The function that generates the group value. Overrides \"add_groups\"")]
 	group_factory = null,
 
 	#[desc("Instead of using 1 unique colour for every pixel, use 1 colour and hue shift to get the right colour. Default is false")]
@@ -179,4 +220,4 @@ bmp_to_objects = (
 //
 
 
-parse_bmp("1.bmp")
+parse_bmp("2.bmp")
