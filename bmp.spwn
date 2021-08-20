@@ -145,7 +145,7 @@ impl @bmp_ihdr {
 				_m = ["r_mask", "g_mask", "b_mask", "a_mask"]
 				if size >= 52 {
 					for i in 0.._m.length {
-						masks[_m[i]] = info_header.read(36 + i * 4).raw().bytes_to_int()
+						masks.set(_m[i], info_header.read(36 + i * 4).raw().bytes_to_int())
 					}
 				} 
 				else {
@@ -153,20 +153,21 @@ impl @bmp_ihdr {
 					
 					//Leave out a_mask
 					for m in _m[0:3] {
-						masks[m] = info_header.read(4).raw().bytes_to_int()
+						val = data.read(4)
+						masks.set(m, val.raw().bytes_to_int())
 					}
 				}
 
-				biRGBMasks = [
-					masks["r_mask"],
-					masks["g_mask"],
-					masks["b_mask"],
-				]
 				biRGBAMask = [
 					masks["r_mask"],
 					masks["g_mask"],
 					masks["b_mask"],
 					masks["a_mask"],
+				]
+				biRGBMask = [
+					masks["r_mask"],
+					masks["g_mask"],
+					masks["b_mask"],
 				]
 			}
 
@@ -174,17 +175,18 @@ impl @bmp_ihdr {
 				return "_{}_{}".fmt([bit, ind])
 			}
 
-			let biMode = @bmp_ihdr::BIT2MODE..biBitCount
-			let raw_mode = null
+			modes = @bmp_ihdr::BIT2MODE..biBitCount
+			let biMode = modes[0]
+			let raw_mode = modes[1]
 			
 			if @bmp_ihdr::COMPRESSIONS.."BITFIELDS" == biCompression {
 				if @bmp_ihdr::SUPPORTED has biBitCount {
-					if biBitCount == 32 && @bmp_ihdr::SUPPORTED..biBitCount has biRGBAMask {
+					if biBitCount == 32 && ((@bmp_ihdr::SUPPORTED..biBitCount) has biRGBAMask) {
 						raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBAMask))]
 						biMode = "RGBA" if raw_mode has "A" else biMode
 					}
-					else if [24, 16] has biBitCount && @bmp_ihdr::SUPPORTED..biBitCount has biRGBAMask {
-						raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBAMask))]
+					else if [24, 16] has biBitCount && ((@bmp_ihdr::SUPPORTED..biBitCount) has biRGBMask) {
+						raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBMask))]
 					}
 					else {
 						_error("Error parsing BMP! (uknown bitfields layout)")
@@ -195,9 +197,9 @@ impl @bmp_ihdr {
 				}
 			}
 			else if @bmp_ihdr::COMPRESSIONS.."RAW" == biCompression {
-				//According to PIL this branch checks a variable called "header" to see if it is `22`
-				//but "header" is never provided as an argument to the func so I dont think this branch ever executes
-				//https://github.com/python-pillow/Pillow/blob/fb0aad5abdab9027cf8f02082ca4dab921692b79/src/PIL/BmpImagePlugin.py#L207
+				// According to PIL this branch checks a variable called "header" to see if it is `22`
+				// but "header" is never provided as an argument to the func so I dont think this branch ever executes
+				// https://github.com/python-pillow/Pillow/blob/fb0aad5abdab9027cf8f02082ca4dab921692b79/src/PIL/BmpImagePlugin.py#L207
 			}
 			else {
 				_error("Error parsing BMP! (uknown compression type {})".fmt([biCompression]))
@@ -236,17 +238,18 @@ type @bmp_csec
 impl @bmp_csec {
 
 	new: (file_header, info_header, data: @data) {
+		let data = data
 		let palette = null
 
 		if info_header.biMode == "P" {
-			if !(0 < info_header.biColors <= 65536) {
+			if info_header.biColors < 0 || info_header.biColors > 65536 {
 				_error("Error parsing BMP! (unsupported palette size {})".fmt([info_header.biColors]))
 			}
 			else {
 				padding = info_header.biPalettePadding
-				palette = self.raw.read(padding * info_header.biColors)
+				palette = data.read(padding * info_header.biColors).raw()
 				let greyscale = true
-				indicies = [ 0, 255 ] if info_header.biColors == 2 else (0..info_header.biColors) as @array
+				indicies = [0, 255] if info_header.biColors == 2 else (0..info_header.biColors) as @array
 
 				for i in 0..indicies.length {
 					val = indicies[i]
@@ -286,11 +289,9 @@ impl @bmp {
 
 		self.ihdr = info_header
 
-		// //biSizeImage is used if the BMP is in true colour and it specifies the size of pixel data
-		// //If the BMP is in indexed colour, the rest of the data is used
-		// data_size = info_header.biImageSize if info_header.biImageSize > 0 else self.raw.length
-
 		self.col = @bmp_csec::new(self.fhdr, self.ihdr, self.raw)
+
+		$.print(self.col)
 
 		self.raw = null
 	},
@@ -374,4 +375,4 @@ bmp_to_objects = (
 }
 
 
-parse_bmp("24bit_rgb.bmp")
+parse_bmp("8bit.bmp")

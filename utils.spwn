@@ -104,7 +104,7 @@ to_binary = (val: @number) {
 		i++
 	}
 
-	return "".join(bin.reverse()) as @number
+	return ("".join(bin.reverse()) as @number) if bin.length > 0 else "0"
 }
 
 to_dec = (bin: @string) {
