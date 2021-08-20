@@ -1,5 +1,54 @@
 extract import "ascii.spwn"
 
+//enum-ish thingy
+//uses the range operator (..) to allow "indexing" of the enum
+type @enum
+impl @enum {
+
+	_range_: (self, text) {
+		if text == null {
+			return
+		}
+
+		if $.matches(text, @string) {
+			//Have to loop through the values since .values() will return the values in a random order each time.
+			for k in self.e.keys() {
+				if self.e[k] == text {
+					return k.l_trim(["_"]) as @number;
+				}
+			}
+		}
+		else {
+			return self.e["_{}".fmt([text])]
+		}
+	},
+
+	_has_: (self, other: @number) {
+		if other == null {
+			return false
+		}
+
+		return self.e.keys().index("_{}".fmt([other])) != null
+	},
+
+	new: (values, nums = []) {
+		let e = {}
+
+		for i in 0..values.length {
+			if nums.length > 0 {
+				e.set("_{}".fmt([nums[i]]), values[i])
+			}
+			else {
+				e.set("_{}".fmt([i]), values[i])
+			}
+		}
+
+		return @enum::{
+			e,
+		}
+	}
+}
+
 type @data
 impl @data {
 	read: (self, amount: @number) {
@@ -42,6 +91,65 @@ impl @array {
 	
 }
 
+to_binary = (val: @number) {
+	let val = val
+
+	let bin = []
+	let i = 0
+
+	while val > 0 {
+		bin.push(val % 2)
+		val = $.floor(val / 2)
+
+		i++
+	}
+
+	return "".join(bin.reverse()) as @number
+}
+
+to_dec = (bin: @string) {
+	let sum = 0
+	let len = bin.length
+
+	for i in 0..len {
+		sum += (bin[i] as @number) * (2 ^ (len - i - 1))
+	}
+
+	return sum
+}
+
+impl @number {
+	//Bitwise left shift
+	s_left: (self, amount: @number) {
+		return self * (2 ^ amount)
+	},
+	
+	//Bitwise and
+	//Im sure theres a more efficient way but whatever it works
+	b_and: (self, val: @number) {
+		let v1 = to_binary(self) as @string
+		let v2 = to_binary(val) as @string
+
+		let new = ""
+
+		//Pad with 0s so they are the same length
+		if v1.length > v2.length {
+			v2 = v2.r_pad(v1.length - v2.length, "0") 
+		} 
+		else {
+			v1  = v1.r_pad(v2.length - v1.length, "0")
+		}
+
+		//Actual and operation
+		for i in 0..v1.length {
+			new += ("1" if v1[i] == "1" && v2[i] == "1" else "0")
+		}
+		
+		return to_dec(new)
+	}
+}
+
 return {
 	data: @data,
+	enum: @enum,
 }

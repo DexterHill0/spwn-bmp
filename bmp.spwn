@@ -6,43 +6,16 @@ _error = (message) {
 	throw "[ERROR]: {}".fmt([message])
 }
 
-type @bmp_csec
-impl @bmp_csec {
+type @colour
+impl @colour {
 
-	MODES: {
-		//The valid bit depths for each mode
-		INDEXED: [1, 4, 8],
-		TRUE_COL: [16, 24, 32]
-	},
-	
-	new: (mode: @number, pix_off: @number, data: @data) {
-		let data = data
-
-		let pal_cols = null
-		let pixels = null
-
-		if @bmp_csec::MODES.INDEXED has mode {
-			//Get the length of the colour palette index thingy
-			pal_index = data.length - pix_off
-
-			pal_cols = data.read(pal_index)
-			pixels = data.read(pix_off)
-		}
-		else if @bmp_csec::MODES.TRUE_COL has mode {
-			//Data is already the pixel data since there is no palette in true colour
-			pixels = data
-		}
-		else {
-			_error("Error parsing BMP (invalid bit depth {})".fmt([mode]))
-		}
-
-		return @bmp_csec::{
-			mode: mode,
-			pal: pal_cols,
-			pix: pixels,
+	new: (r: @number, g: @number, b: @number, a: @number = 1) {
+		return @colour::{
+			r, g, b, a
 		}
 	}
 }
+
 
 //Moved into separate classes since it's just a bit neater
 type @bmp_fhdr
@@ -57,7 +30,7 @@ impl @bmp_fhdr {
 		bfType = file_header.read(2).raw().bytes_to_str()
 		bfSize = file_header.read(4).raw().bytes_to_int()
 		
-		//Skip reserved
+		//Skips reserved
 		file_header.move(4)
 
 		bfOffBits = file_header.read(4).raw().bytes_to_int()
@@ -73,34 +46,224 @@ impl @bmp_fhdr {
 	}
 }
 
+// https://github.com/python-pillow/Pillow/blob/master/src/PIL/BmpImagePlugin.py
+// ^^^ very helpful :)
 type @bmp_ihdr
 impl @bmp_ihdr {
+	
+	BIT2MODE: @enum::new([
+		["P", "P;1"],
+		["P", "P;4"],
+		["P", "P"],
+		["RGB", "BGR;15"],
+		["RGB", "BGR"],
+		["RGB", "BGRX"]
+	], [1, 4, 8, 16, 24, 32]),
+
+	SUPPORTED: @enum::new([
+		[
+			[16711680, 65280, 255, 0],
+			[16711680, 65280, 255, 4278190080],
+			[255, 65280, 16711680, 4278190080],
+			[0, 0, 0, 0],
+			[4278190080, 16711680, 65280, 0],
+		],	
+		[[16711680, 65280, 255]],
+		[[63488, 2016, 31], [31744, 992, 31]],
+	], [32, 24, 16]),
+
+	MASK_MODES: {
+		_32_0: "BGRX",
+		_32_1: "XBGR",
+		_32_2: "RGBA",
+		_32_3: "BGRA",
+		_32_4: "BGRA",
+		_24_0: "BGR",	
+		_16_0: "BGR;16",
+		_16_1: "BGR;15",
+	},
+
+	COMPRESSIONS: @enum::new(["RAW", "RLE8", "RLE4", "BITFIELDS"]),
+
 	new: (data: @data) {
 		let data = data
 
 		size = data.read(4).raw().bytes_to_int()
 
-		let info_header = data.read(size)
-		
-		biWidth = info_header.read(4).raw().bytes_to_int()
-		biHeight = info_header.read(4).raw().bytes_to_int()
+		//IBM OS/2 Bitmap v1
+		if size == 12 {
+			let info_header = data.read(size - 4)
 
-		//Skips `biPlanes`
-		info_header.move(2)
+			biWidth = info_header.read(2).raw().bytes_to_int()
+			biHeight = info_header.read(2).raw().bytes_to_int()
+			biPlanes = info_header.read(2).raw().bytes_to_int()
+			biBitCount = info_header.read(2).raw().bytes_to_int()
+			biCompression = @bmp::COMPRESSIONS.."RAW"
+			biPalettePadding = 3
 
-		biBitCount = info_header.read(2).raw().bytes_to_int()
-		biCompression = info_header.read(4).raw().bytes_to_int()
-		biSizeImage = info_header.read(4).raw().bytes_to_int()
+			return @bmp_fhdr::{
+				size,
+				biWidth,
+				biHeight,
+				biPlanes,
+				biBitCount,
+				biCompression,
+				biPalettePadding,
+			}
 
-		return @bmp_fhdr::{
-			size,
-			biWidth,
-			biHeight,
-			biPlanes: 1,
-			biBitCount,
-			biCompression,
-			biSizeImage,
 		}
+		//Windows Bitmap v2 to v5
+		else if [40, 64, 108, 124] has size {
+			let info_header = data.read(size - 4)
+
+			biWidth = info_header.read(4).raw().bytes_to_int()
+			biHeight = info_header.read(4).raw().bytes_to_int()
+			biPlanes = info_header.read(2).raw().bytes_to_int()
+			biBitCount = info_header.read(2).raw().bytes_to_int()
+			biCompression = info_header.read(4).raw().bytes_to_int()
+			biImageSize = info_header.read(4).raw().bytes_to_int()
+			biPixPerMeter = [
+				info_header.read(4).raw().bytes_to_int(),
+				info_header.read(4).raw().bytes_to_int(),
+			]
+
+			biColors = info_header.read(4).raw().bytes_to_int()
+			biColors = biColors if biColors != 0 else 1.s_left(biBitCount)
+
+			biPalettePadding = 4
+			let biDpi = []
+
+			let masks = {}
+			let biRGBMask = []
+			let biRGBAMask = []
+
+			for m in biPixPerMeter {
+				biDpi.push($.floor(m / 39.3701 + 0.5))
+			}
+
+			if @bmp_ihdr::COMPRESSIONS.."BITFIELDS" == biCompression {
+				_m = ["r_mask", "g_mask", "b_mask", "a_mask"]
+				if size >= 52 {
+					for i in 0.._m.length {
+						masks[_m[i]] = info_header.read(36 + i * 4).raw().bytes_to_int()
+					}
+				} 
+				else {
+					masks["a_mask"] = 0
+					
+					//Leave out a_mask
+					for m in _m[0:3] {
+						masks[m] = info_header.read(4).raw().bytes_to_int()
+					}
+				}
+
+				biRGBMasks = [
+					masks["r_mask"],
+					masks["g_mask"],
+					masks["b_mask"],
+				]
+				biRGBAMask = [
+					masks["r_mask"],
+					masks["g_mask"],
+					masks["b_mask"],
+					masks["a_mask"],
+				]
+			}
+
+			mask_key = (bit, ind) {
+				return "_{}_{}".fmt([bit, ind])
+			}
+
+			let biMode = @bmp_ihdr::BIT2MODE..biBitCount
+			let raw_mode = null
+			
+			if @bmp_ihdr::COMPRESSIONS.."BITFIELDS" == biCompression {
+				if @bmp_ihdr::SUPPORTED has biBitCount {
+					if biBitCount == 32 && @bmp_ihdr::SUPPORTED..biBitCount has biRGBAMask {
+						raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBAMask))]
+						biMode = "RGBA" if raw_mode has "A" else biMode
+					}
+					else if [24, 16] has biBitCount && @bmp_ihdr::SUPPORTED..biBitCount has biRGBAMask {
+						raw_mode = @bmp_ihdr::MASK_MODES[mask_key(biBitCount, (@bmp_ihdr::SUPPORTED..biBitCount).index(biRGBAMask))]
+					}
+					else {
+						_error("Error parsing BMP! (uknown bitfields layout)")
+					}
+				}
+				else {
+					_error("Error parsing BMP! (uknown bitfields layout)")
+				}
+			}
+			else if @bmp_ihdr::COMPRESSIONS.."RAW" == biCompression {
+				//According to PIL this branch checks a variable called "header" to see if it is `22`
+				//but "header" is never provided as an argument to the func so I dont think this branch ever executes
+				//https://github.com/python-pillow/Pillow/blob/fb0aad5abdab9027cf8f02082ca4dab921692b79/src/PIL/BmpImagePlugin.py#L207
+			}
+			else {
+				_error("Error parsing BMP! (uknown compression type {})".fmt([biCompression]))
+			}
+
+			return @bmp_fhdr::{
+				size,
+				biWidth,
+				biHeight,
+				biPlanes,
+				biBitCount,
+				biCompression,
+				biImageSize,
+				biPixPerMeter,
+				biColors,
+				biPalettePadding,
+				biDpi,
+				biRGBMask,
+				biRGBAMask,
+				biMode
+			}
+
+		}
+		else {
+			_error("Error parsing BMP! (unknown header type {})".fmt([size]))
+		}
+	}
+}
+
+type @palette
+impl @palette {
+
+}
+
+type @bmp_csec
+impl @bmp_csec {
+
+	new: (file_header, info_header, data: @data) {
+		let palette = null
+
+		if info_header.biMode == "P" {
+			if !(0 < info_header.biColors <= 65536) {
+				_error("Error parsing BMP! (unsupported palette size {})".fmt([info_header.biColors]))
+			}
+			else {
+				padding = info_header.biPalettePadding
+				palette = self.raw.read(padding * info_header.biColors)
+				let greyscale = true
+				indicies = [ 0, 255 ] if info_header.biColors == 2 else (0..info_header.biColors) as @array
+
+				for i in 0..indicies.length {
+					val = indicies[i]
+
+					rgb = palette[i * padding : i * padding + 3]
+
+					if rgb != ((val.b_and(255)) * 3) {
+						greyscale = false
+					}
+				}
+			}
+		}
+
+		return @bmp_csec::{
+			palette,
+		}
+		
 	}
 }
 
@@ -112,40 +275,35 @@ impl @bmp {
 		file_header = @bmp_fhdr::new(self.raw)
 		self.raw.move(file_header.size)
 
+		self.fhdr = file_header
+
 		if @bmp::HEADER != file_header.bfType {
-			_error("Invalid BMP file! (incorrect file header)")
+			_error("Invalid BMP file! (incorrect file header \"{}\")".fmt(file_header.bfType))
 		}
 
 		info_header = @bmp_ihdr::new(self.raw)
 		self.raw.move(info_header.size)
 
-		self.inf = {
-			w: info_header.biWidth,
-			h: info_header.biHeight,
-		}
+		self.ihdr = info_header
 
-		//biSizeImage is used if the BMP is in true colour and it specifies the size of pixel data
-		//If the BMP is in indexed colour, the rest of the data is used
-		data_size = info_header.biSizeImage if info_header.biSizeImage > 0 else self.raw.length
+		// //biSizeImage is used if the BMP is in true colour and it specifies the size of pixel data
+		// //If the BMP is in indexed colour, the rest of the data is used
+		// data_size = info_header.biImageSize if info_header.biImageSize > 0 else self.raw.length
 
-		self.col = @bmp_csec::new(
-			info_header.biBitCount,
-			//bfOffBits (p_off) is relative to the start of the file so I need to subtract the length that I have already read
-			file_header.bfOffBits - file_header.size - info_header.size, 
-			self.raw.read(data_size)
-		)
-
+		self.col = @bmp_csec::new(self.fhdr, self.ihdr, self.raw)
 
 		self.raw = null
+	},
+
+	pixel_at: (self, x: @number, y: @number) {
+		return self.col.at(x, y)
 	},
 
 	new: (data: @data) {
 
 		return @bmp::{
-			inf: {
-				w: null,
-				h: null,
-			},
+			fhdr: null,
+			ihdr: null,
 			col: null,
 			raw: data
 		}
@@ -215,9 +373,5 @@ bmp_to_objects = (
 	}
 }
 
-// 1.bmp = average bmp (true colour)
-// 2.bmp = indexed colour bmp
-//
 
-
-parse_bmp("2.bmp")
+parse_bmp("24bit_rgb.bmp")
