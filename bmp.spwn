@@ -211,9 +211,7 @@ impl @bmp_ihdr {
 		biTile = [
 			raw_mode,
 			data.p,
-			//TODO: proper binary AND
-
-			//((biWidth * biBitCount + 31).s_right(3)).b_and(-4),
+			$.floor((biWidth * biBitCount + 31).s_right(3) / 4) * 4,
 		]
 
 		return @bmp_fhdr::{
@@ -294,7 +292,7 @@ impl @bmp {
 		self.ihdr = info_header
 
 		self.col = @bmp_csec::new(self.fhdr, self.ihdr, self.raw)
-
+		
 		self.raw = null
 	},
 
@@ -376,4 +374,4 @@ bmp_to_objects = (
 	}
 }
 
-parse_bmp("24bit_top-bottom.bmp")
+parse_bmp("24bit_rgb.bmp")

@@ -11,7 +11,8 @@ impl @enum {
 		}
 
 		if $.matches(text, @string) {
-			//Have to loop through the values since .values() will return the values in a random order each time.
+			//Have to loop through the keys since .values() will return the values in a random order each time and the order
+			//of an enum is *very* important
 			for k in self.e.keys() {
 				if self.e[k] == text {
 					return k.l_trim(["_"]) as @number;
@@ -91,6 +92,33 @@ impl @array {
 	
 }
 
+num_to_bin = (n: @number, bits: @number) {
+    let digits = []
+    let val = $.abs(n)
+    for i in bits..0 {
+        x = 2^i
+        if val >= x {
+            val -= x
+            digits.push(true)
+        } else {
+            digits.push(false)
+        }
+    }
+
+    return digits.reverse()
+}
+
+bin_to_num = (bin: [@bool]) {
+	let sum = 0
+	for i in 0..bin.length {
+		if bin[i] {
+			sum += 2 ^ i
+		}
+	}
+	return sum
+}
+
+
 impl @number {
 	//Bitwise left shift
 	s_left: (self, amount: @number) {
@@ -103,9 +131,15 @@ impl @number {
 	},
 	
 	//Bitwise AND
-	//Im sure theres a more efficient way but whatever it works
 	b_and: (self, val: @number) {
-		
+		let v1 = num_to_bin(self, 16)
+		let v2 = num_to_bin(val, 16)
+
+		for i in 0..v1.length {
+			v1[i] = v1[i] && v2[i]
+		}
+
+		return bin_to_num(v1)
 	},
 }
 
