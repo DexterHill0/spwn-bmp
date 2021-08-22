@@ -9,9 +9,9 @@ _error = (message) {
 type @colour
 impl @colour {
 
-	new: (r: @number, g: @number, b: @number, a: @number = 1) {
+	new: (r: @number, g: @number, b: @number, a: @number = 255) {
 		return @colour::{
-			r, g, b, a
+			r, g, b, a: (a / 255)
 		}
 	}
 }
@@ -46,6 +46,7 @@ impl @bmp_fhdr {
 	}
 }
 
+// https://upload.wikimedia.org/wikipedia/commons/c/c4/BMPfileFormat.png
 // https://github.com/python-pillow/Pillow/blob/master/src/PIL/BmpImagePlugin.py
 // ^^^ very helpful :)
 type @bmp_ihdr
@@ -54,7 +55,7 @@ impl @bmp_ihdr {
 	BIT2MODE: @enum::new([
 		["P", "P;1"],
 		["P", "P;4"],
-		["P", "P"],
+		["P", "P;8"],
 		["RGB", "BGR;15"],
 		["RGB", "BGR"],
 		["RGB", "BGRX"]
@@ -91,14 +92,14 @@ impl @bmp_ihdr {
 
 		size = data.read(4).raw().bytes_to_int()
 
+		let info_header = data.read(size - 4)
+
 		//Oops >.<
 		let biWidth = null; let biHeight = null; let biPlanes = null; let biBitCount = null; let biCompression = null; let biPalettePadding = null;
 		let biYFlip = null; let biDirection = null; let biImageSize = null; let biPixPerMeter = null; let biColors = null; let biDpi = [];
 
 		//IBM OS/2 Bitmap v1
 		if size == 12 {
-			let info_header = data.read(size - 4)
-
 			biWidth = info_header.read(2).raw().bytes_to_int()
 			biHeight = info_header.read(2).raw().bytes_to_int()
 			biPlanes = info_header.read(2).raw().bytes_to_int()
@@ -109,8 +110,6 @@ impl @bmp_ihdr {
 		}
 		//Windows Bitmap v2 to v5
 		else if [40, 64, 108, 124] has size {
-			let info_header = data.read(size - 4)
-
 			biYFlip = (info_header.raw()[7] == 255)
 			biDirection = 1 if biYFlip else -1
 
@@ -148,8 +147,9 @@ impl @bmp_ihdr {
 		if @bmp_ihdr::COMPRESSIONS.."BITFIELDS" == biCompression {
 			_m = ["r_mask", "g_mask", "b_mask", "a_mask"]
 			if size >= 52 {
+				info_header.move(4)
 				for i in 0.._m.length {
-					masks.set(_m[i], info_header.read(36 + i * 4).raw().bytes_to_int())
+					masks.set(_m[i], info_header.read(4).raw().bytes_to_int())
 				}
 			} 
 			else {
@@ -210,7 +210,6 @@ impl @bmp_ihdr {
 
 		biTile = [
 			raw_mode,
-			data.p,
 			$.floor((biWidth * biBitCount + 31).s_right(3) / 4) * 4,
 		]
 
@@ -236,6 +235,26 @@ impl @bmp_ihdr {
 	}
 }
 
+type @bmp_palette
+impl @bmp_palette {
+
+	new: (data: [@number], mode: @string) {
+		let colours = []
+
+		len = (data.length / 4)
+
+		for i in 0..len {
+			//Skip the 4th index since it's usually reserved
+			//It's in BGR order
+			colours.push(@colour::new(data[i*4+2], data[i*4+1], data[i*4]))
+		}
+
+		return @bmp_palette::{
+			colours,
+		}
+	}
+}
+
 type @bmp_csec
 impl @bmp_csec {
 
@@ -243,14 +262,17 @@ impl @bmp_csec {
 		let data = data
 		let palette = null
 
+		let mode = info_header.biMode
+
 		if info_header.biMode == "P" {
 			if info_header.biColors < 0 || info_header.biColors > 65536 {
 				_error("Error parsing BMP! (unsupported palette size {})".fmt([info_header.biColors]))
 			}
 			else {
+				let greyscale = true
+
 				padding = info_header.biPalettePadding
 				palette = data.read(padding * info_header.biColors).raw()
-				let greyscale = true
 				indicies = [0, 255] if info_header.biColors == 2 else (0..info_header.biColors) as @array
 
 				for i in 0..indicies.length {
@@ -258,17 +280,134 @@ impl @bmp_csec {
 
 					rgb = palette[i * padding : i * padding + 3]
 
-					if rgb != ((val.b_and(255)) * 3) {
+					if rgb.sum() != (val.b_and(255)) * 3 {
 						greyscale = false
 					}
+				}
+
+				if greyscale {
+					// TODO: Test >1bit greyscale bitmaps
+					mode = "G" if info_header.biColors == 2 else raw_mode
+				}
+				else {
+					palette = @bmp_palette::new(palette, "BGRX" if padding == 4 else "BGR")
 				}
 			}
 		}
 
+		pix_data_len = info_header.biTile[1] * info_header.biHeight
+		
+		//Move back to the start
+		data.move(-data.p)
+		//Use the defined offset to get to the data because it is possible there is a gap between the colour table and pixel data
+		data.move(file_header.bfOffBits)
+
+		let pix_data = data.read(pix_data_len)
+
+		//TODO: test y flipped bmps
+
+		let read = []
+
+		let padding = $.floor(4 - ((info_header.biWidth * info_header.biBitCount / 8) % 4))
+		padding = padding if padding != 4 else 0
+
+		//Im sure theres a much better way of doing this lol
+		while !pix_data.is_eof() {
+			let bytes = pix_data.read(info_header.biTile[1] - padding).raw()
+			let b = []
+			
+			//1 bit monochrome / indexed BMP
+			if info_header.biBitCount == 1 {
+				bytes = bytes.map((b) => b.to_bin()).flatten()
+
+				//1 bit is 1 pixel
+				for i in 0..bytes.length {
+					if i >= info_header.biWidth {
+						break
+					}
+					b.push(bytes[i])
+				}
+			}
+			//4 bit indexed BMP
+			else if info_header.biBitCount == 4 {
+				bytes = bytes.map((b) => b.to_bin()).flatten()
+
+				//1 nibble is 1 pixel
+				for i in 0..4..bytes.length - 4 {
+					if i / 4 >= info_header.biWidth {
+						break
+					}
+					//to_bin will return in big endian format so we need to specify big endian when converting it back to an int
+					b.push(bytes[i:i+4].binary_to_int())
+				}
+			}
+			//8 bit indexed BMP
+			else if info_header.biBitCount == 8 {
+				bytes = bytes.map((b) => b.to_bin())
+
+				//Custom enumerate function :)
+				enumerate(bytes, (i, byte, end) {
+					if i >= info_header.biWidth {
+						end()
+					}
+					b.push(byte.binary_to_int())
+				})
+
+			}
+			//16 bit true colour BMP (RGB555[1] / RGB565)
+			else if info_header.biBitCount == 16 {
+				bytes = @data::new(bytes.map((b) => b.to_bin()).flatten())
+
+				to_8_bit = (val) {
+					return (val * 255) / 31
+				}
+
+				for i in 0..(bytes.length / 16) {
+					blue = to_8_bit(bytes.read(5).raw().binary_to_int())
+					let green = null
+					let red = null
+
+					//Indicates RGB 565
+					if info_header.biRGBAMask.length > 0 || info_header.biRGBMask.length > 0 {
+						green = to_8_bit(bytes.read(6).raw().binary_to_int())
+						red = to_8_bit(bytes.read(5).raw().binary_to_int())
+					}
+					//RGB 555[1]
+					else {
+						green = to_8_bit(bytes.read(5).raw().binary_to_int())
+						red = to_8_bit(bytes.read(5).raw().binary_to_int())
+						bytes.move(1)
+					}
+
+					b.push(@colour::new(red, green, blue))
+				}
+			}
+			//24 bit true colour BMP
+			else if info_header.biBitCount == 24 {
+				for i in 0..3..bytes.length - 3 {
+					//Convert into colour instances - format is BRG
+					b.push(@colour::new(bytes[i:i+3][2], bytes[i:i+3][1], bytes[i:i+3][0]))
+				}
+			}
+			//32 bit true colour BMP (RBG / RGBA)
+			else if info_header.biBitCount == 32 {
+				for i in 0..4..bytes.length - 4 {
+					//Convert into colour instances - format is BRG
+					b.push(@colour::new(bytes[i:i+4][2], bytes[i:i+4][1], bytes[i:i+4][0], a=bytes[i:i+4][3]))
+				}
+			}
+
+			read.push(b)
+			pix_data.move(padding)
+		}
+
+		$.print(read)
+
 		return @bmp_csec::{
 			palette,
-		}
-		
+			read,
+			mode,
+		}	
 	}
 }
 
@@ -292,7 +431,7 @@ impl @bmp {
 		self.ihdr = info_header
 
 		self.col = @bmp_csec::new(self.fhdr, self.ihdr, self.raw)
-		
+
 		self.raw = null
 	},
 
@@ -374,4 +513,4 @@ bmp_to_objects = (
 	}
 }
 
-parse_bmp("24bit_rgb.bmp")
+parse_bmp("16bit5551.bmp")

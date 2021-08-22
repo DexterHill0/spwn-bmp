@@ -82,6 +82,7 @@ impl @data {
 impl @array {
 	//Takes array of bytes and converts them to an integer
 	bytes_to_int: (self) {
+		//Needs to be reversed since BMPs are little endian
 		return self.reverse().reduce((acum, el) => (acum * 256) + el)
 	},
 
@@ -89,33 +90,16 @@ impl @array {
 	bytes_to_str: (self) {
 		return "".join(self.map((i) => chr(i)))
 	},
-	
-}
 
-num_to_bin = (n: @number, bits: @number) {
-    let digits = []
-    let val = $.abs(n)
-    for i in bits..0 {
-        x = 2^i
-        if val >= x {
-            val -= x
-            digits.push(true)
-        } else {
-            digits.push(false)
-        }
-    }
-
-    return digits.reverse()
-}
-
-bin_to_num = (bin: [@bool]) {
-	let sum = 0
-	for i in 0..bin.length {
-		if bin[i] {
-			sum += 2 ^ i
+	binary_to_int: (self) {
+		let sum = 0
+		for i in 0..self.length {
+			if self[i] == 1 {
+				sum += 2 ^ i
+			}
 		}
+		return sum
 	}
-	return sum
 }
 
 
@@ -129,21 +113,48 @@ impl @number {
 	s_right: (self, amount: @number) {
 		return self / (2 ^ amount)
 	},
+
+	to_bin: (self, bits=8) {
+		let digits = []
+		let val = $.abs(self)
+		for i in bits..0 {
+			x = 2 ** i
+			if val >= x {
+				val -= x
+				digits.push(1)
+			} else {
+				digits.push(0)
+			}
+		}
+		return digits.reverse()
+	},
 	
 	//Bitwise AND
 	b_and: (self, val: @number) {
-		let v1 = num_to_bin(self, 16)
-		let v2 = num_to_bin(val, 16)
+		let v1 = self.to_bin(16)
+		let v2 = val.to_bin(16)
 
 		for i in 0..v1.length {
-			v1[i] = v1[i] && v2[i]
+			v1[i] = (v1[i] as @bool) && (v2[i] as @bool)
 		}
 
-		return bin_to_num(v1)
+		return v1.binary_to_int()
 	},
 }
+
+enumerate = (iterator, callback) {
+	let index = 0
+	let cont = true
+	while cont && index < iterator.length - 1 {
+		end = () { cont = false }
+		callback(index, iterator[index], end)
+		index++
+	}
+}
+
 
 return {
 	data: @data,
 	enum: @enum,
+	enumerate,
 }
