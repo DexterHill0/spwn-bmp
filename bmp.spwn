@@ -682,3 +682,8 @@ bmp_to_objects = (
 		}
 	}
 }
+
+return {
+	parse_bmp,
+	bmp_to_objects,
+}
