@@ -573,9 +573,7 @@ bmp_to_objects = (
 	start_col_group = ?c,
 	#[desc("Instead of using 1 unique colour for every pixel, use 1 colour and hue shift to get the right colour. Default is false")]
 	use_hue_shift = false,
-	#[desc("Starting hue offset. Default is 0")]
-	hue_offset = 0,
-
+	
 	#[desc("The size of the individual pixels. Default is 1")]
 	pixel_scale = 1,
 	#[desc("The number of pixels placed per pixel in the image (must be a square number). Default is 1")]
