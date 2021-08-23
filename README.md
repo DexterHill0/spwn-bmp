@@ -39,7 +39,7 @@ Returns: `@bmp`
 
 **\***:
 `group_factory` is the macro used to generate the groups for each of the pixels. 
-Two object are provided as arguments:
+Two objects are provided as arguments:
 
 - arg[0] `{x, y, raw_x, raw_y}` -> positions of the pixels. `x` and `y` are different to `raw_x` and `raw_y` if `pixel_density` has been changed.
 - arg[1] `{bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, current_group}` -> extra data for whatever code runs within in the macro.
@@ -50,5 +50,5 @@ Notes:
 
 
 
-**\*\***
+**\*\***:
 Pixel density must be a square number. For instance, to double the density, set `pixel_density` to `4` since `2*2 == 4`. (for 3X size, `3*3 == 9` so pixel density would be set to 9).
