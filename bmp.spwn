@@ -1,6 +1,8 @@
+extract obj_props
 extract import "utils.spwn"
 
-PIXEL_OBJ_ID = null
+PIXEL_OBJ_ID = 472
+PIXEL_OBJ_WIDTH = 1.4
 
 _error = (message) {
 	throw "[ERROR]: {}".fmt([message])
@@ -8,6 +10,53 @@ _error = (message) {
 
 type @colour
 impl @colour {
+
+	to_hsv: (self) {
+		let r = self.r / 255
+		let g = self.g / 255
+		let b = self.b / 255
+
+		cmax = $.max(r, $.max(g, b))
+		cmin = $.min(r, $.min(g, b))
+		diff = cmax - cmin
+
+		let h = -1
+		let s = -1
+		let v = cmax * 100
+
+		if cmax == cmin {
+			h = 0
+		}
+		else if cmax == r {
+			h = (60 * ((g - b) / diff) + 360) % 360;
+		}
+		else if cmax == g {
+			h = (60 * ((b - r) / diff) + 120) % 360;
+		}
+		else if cmax == b {
+			h = (60 * ((r - g) / diff) + 240) % 360;
+		}
+
+		if cmax == 0 {
+			s = 0
+		}
+		else {
+			s = (diff / cmax) * 100;
+		}
+
+		return [h, s, v]
+	},
+
+	get_hsv_shift: (self, other: @colour) {
+		let v1 = self.to_hsv()
+		let v2 = other.to_hsv()
+
+		s_offset = (v1[1] - v2[1]) / 100
+		v_offset = (v1[2] - v2[2]) / 100
+		h_offset = 360 - (v1[0] - v2[0])
+
+		return [h_offset, v_offset, s_offset]
+	},
 
 	new: (r: @number, g: @number, b: @number, a: @number = 255) {
 		return @colour::{
@@ -272,18 +321,18 @@ impl @bmp_csec {
 
 	at: (self, x: @number, y: @number) {
 		if self.mode == "P" {
-			index = self.read[x][y]
+			index = self.read[y][x]
 			return self.palette.get_colour(index)
 		}
 		else {
 			//Monochrome non indexed
 			if self.mode == "G" {
-				col = self.read[x][y]
+				col = self.read[y][x]
 				//Either black or while
 				return @colour::new(col*255, col*255, col*255)
 			}
 
-			return self.read[x][y]
+			return self.read[y][x]
 		}
 	},
 
@@ -501,18 +550,27 @@ parse_bmp = (
 
 
 bmp_to_objects = (
+	#[desc("The BMP object")]
+	bmp,
 	#[desc("Starting x offset for the pixels. Default is 5 blocks (from 0,0)")]
-	start_x = 10,
+	start_x = 150,
 	#[desc("Starting y offset for the pixels. Default is 50 blocks (from 0,0)")]
-	start_y = 100,
+	start_y = 1500,
 
-	#[desc("Starting group for the objects. Default is 1")]
-	start_group = 1,
+	#[desc("Starting group for the objects. Default is next free group")]
+	start_id_group = ?g,
 	#[desc("Enables/Disables adding groups to all the pixels. Default is false")]
 	add_groups = false,
-	#[desc("The function that generates the group value. Overrides \"add_groups\"")]
+	#[desc("
+	The function that generates the group value. Two object are provided as arguments:\n
+	-[0] {x, y, raw_x, raw_y} -> positions of the pixels. `x` and `y` are different to `raw_x` and `raw_y` if `pixel_density` has be changed.\n
+	-[1] {bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, current_group} -> extra data for whatever code runs within in the macro\n
+	The function MUST return: `@number` or `@group`
+	")]
 	group_factory = null,
 
+	#[desc("Starting colour group for the objects. Default is next free group")]
+	start_col_group = ?c,
 	#[desc("Instead of using 1 unique colour for every pixel, use 1 colour and hue shift to get the right colour. Default is false")]
 	use_hue_shift = false,
 	#[desc("Starting hue offset. Default is 0")]
@@ -520,7 +578,7 @@ bmp_to_objects = (
 
 	#[desc("The size of the individual pixels. Default is 1")]
 	pixel_scale = 1,
-	#[desc("The number of pixels placed per pixel in the image (n:1). Default is 1")]
+	#[desc("The number of pixels placed per pixel in the image (must be a square number). Default is 1")]
 	pixel_density = 1,
 
 	#[desc("Enables/Disables glow on the pixels. Default is false")]
@@ -534,15 +592,93 @@ bmp_to_objects = (
 		_error("start_y must be greater than 0!")
 	}
 
-	if start_group <= 0 {
-		_error("start_group must be greater than 0!")
-	}
-
 	if hue_offset < 0 || hue_offset > 180 {
 		_error("hue_offset must be between 0 and 180!")
 	}
 
 	if pixel_scale < 0.1 || pixel_scale > 4 {
 		_error("pixel_scale must be between 0.1 and 4!")
+	}
+
+	//If the square root is not the same as the floored sqaure root it means it wasnt a square number
+	if $.sqrt(pixel_density) != $.floor($.sqrt(pixel_density)) {
+		_error("pixel_density must be a square number! (4 -> 2 times large, 9 -> 3 times as large, 16...)")
+	}
+
+	let col_id = @inc_group::new(start_col_group)
+	let col_group = col_id.group()
+
+	let group_id = @inc_group::new(start_id_group)
+
+	//To pass the group id as a number to group_factory it needs to not be "next free"
+	if group_factory != null && group_id.is_next_free {
+		_error("group_factory cannot be used when start_id_group is ?g!")
+	}
+
+	//Default/Starting values if using hue shift
+	let pixel_col = bmp.pixel_at(0, 0)
+	-> col_group.set(pixel_col.r, pixel_col.g, pixel_col.b, pixel_col.a, duration=0)
+
+	let hsv_string = ""
+
+	//Default group factory - just increments the group every time it's called
+	let group_factory = (_, __) {
+		id = group_id.group()
+		group_id = group_id.next()
+		return id
+	} if group_factory == null else group_factory
+
+	let size = $.sqrt(pixel_density)
+
+	for x in 0..bmp.ihdr.biWidth * size {
+		for y in 0..bmp.ihdr.biHeight * size {
+			//Need the x and y values mapped to the original image sizes so I can get the colours correctly
+			raw_x = x.map(0, bmp.ihdr.biWidth * size, 0, bmp.ihdr.biWidth)
+			raw_y = y.map(0, bmp.ihdr.biHeight * size, 0, bmp.ihdr.biHeight)
+
+			if !use_hue_shift {
+				pixel_col = bmp.pixel_at(raw_x, raw_y)
+
+				col_id = col_id.next()
+				col_group = col_id.group()
+
+				-> col_group.set(pixel_col.r, pixel_col.g, pixel_col.b, pixel_col.a, duration=0)
+			}
+			else {
+				shift = pixel_col.get_hsv_shift(bmp.pixel_at(raw_x, raw_y))
+				h_shift = shift[0]
+				v_shift = shift[1]
+				s_shift = shift[2]
+
+				hsv_string = "{}a{}a{}a1a1".fmt([h_shift, v_shift, s_shift])
+			}
+	
+			nx = (x * PIXEL_OBJ_WIDTH * pixel_scale) + start_x
+			ny = (y * PIXEL_OBJ_WIDTH * pixel_scale) + start_y
+
+			//Get the group
+			fac_group = group_factory({x, y, raw_x, raw_y}, {
+					bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, current_group: group_id._as_num()
+				}) as @group
+			
+			//Update with new group
+			group_id = @inc_group::new(fac_group)
+
+			object = obj {
+				OBJ_ID: PIXEL_OBJ_ID,
+				X: nx,
+				Y: ny,
+				COLOR: col_group,
+				HVS: hsv_string if use_hue_shift else "",
+				HVS_ENABLED: use_hue_shift,
+				GROUPS: fac_group if add_groups else 0g,
+				DONT_FADE: true,
+				DONT_ENTER: true,
+				GLOW_DISABLED: !show_glow,
+				SCALING: pixel_scale,
+			}	
+
+			$.add(object)
+		}
 	}
 }

@@ -148,10 +148,38 @@ impl @number {
 	},
 }
 
+type @inc_group 
+impl @inc_group {
+
+	_as_num: (self) {
+		return self._group as @number if !self.is_next_free else null
+	},
+
+	group: (self) {
+		return (?g if self.pattern == @group else ?c) if self.is_next_free else (self.group as self.pattern)
+	},
+
+	next: (self) {
+		return @inc_group::new((((self._group as @number)+1) as self.pattern) if !self.is_next_free else (?g if self.pattern == @group else ?c))
+	},
+
+	new: (group: @group | @color) {
+		pattern = @group if (group as @string).ends_with("g") else @color
+
+		is_next_free = ["?g", "?c"] has (group as @string)
+
+		return @inc_group::{
+			_group: group,
+			is_next_free,
+			pattern
+		}
+	}
+}
+
 enumerate = (iterator, callback) {
 	let index = 0
 	let cont = true
-	while cont && index < iterator.length - 1 {
+	while cont && index <= iterator.length - 1 {
 		end = () { cont = false }
 		callback(index, iterator[index], end)
 		index++
@@ -162,5 +190,6 @@ enumerate = (iterator, callback) {
 return {
 	data: @data,
 	enum: @enum,
+	inc_group: @inc_group,
 	enumerate,
 }
