@@ -99,6 +99,12 @@ impl @array {
 			}
 		}
 		return sum
+	},
+
+	fill: (self, amount, value) {
+		nums = "".r_pad(amount + 1, "{},".fmt([value])).split(",")[0:amount].map((val) => val as @number)
+
+		return nums
 	}
 }
 

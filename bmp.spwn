@@ -204,12 +204,11 @@ impl @bmp_ihdr {
 			// but "header" is never provided as an argument to the func so I dont think this branch ever executes
 			// https://github.com/python-pillow/Pillow/blob/fb0aad5abdab9027cf8f02082ca4dab921692b79/src/PIL/BmpImagePlugin.py#L207
 		}
-		else {
+		else if @bmp_ihdr::COMPRESSIONS.."RLE8" != biCompression && @bmp_ihdr::COMPRESSIONS.."RLE4" != biCompression {
 			_error("Error parsing BMP! (uknown compression type {})".fmt([biCompression]))
 		}
 
 		biTile = [
-			raw_mode,
 			$.floor((biWidth * biBitCount + 31).s_right(3) / 4) * 4,
 		]
 
@@ -238,6 +237,10 @@ impl @bmp_ihdr {
 type @bmp_palette
 impl @bmp_palette {
 
+	get_colour: (self, index: @number) {
+		return self.colours[index]
+	},
+
 	new: (data: [@number], mode: @string) {
 		let colours = []
 
@@ -255,8 +258,34 @@ impl @bmp_palette {
 	}
 }
 
+rle_decompress = (data) {
+	let decomp = []
+	let data = data.raw()
+	for i in 0..2..data.length {
+		decomp.push([].fill(data[i], data[i+1]))
+	}
+	return @data::new(decomp.flatten())
+}
+
 type @bmp_csec
 impl @bmp_csec {
+
+	at: (self, x: @number, y: @number) {
+		if self.mode == "P" {
+			index = self.read[x][y]
+			return self.palette.get_colour(index)
+		}
+		else {
+			//Monochrome non indexed
+			if self.mode == "G" {
+				col = self.read[x][y]
+				//Either black or while
+				return @colour::new(col*255, col*255, col*255)
+			}
+
+			return self.read[x][y]
+		}
+	},
 
 	new: (file_header, info_header, data: @data) {
 		let data = data
@@ -286,7 +315,6 @@ impl @bmp_csec {
 				}
 
 				if greyscale {
-					// TODO: Test >1bit greyscale bitmaps
 					mode = "G" if info_header.biColors == 2 else raw_mode
 				}
 				else {
@@ -295,7 +323,7 @@ impl @bmp_csec {
 			}
 		}
 
-		pix_data_len = info_header.biTile[1] * info_header.biHeight
+		pix_data_len = info_header.biTile[0] * info_header.biHeight
 		
 		//Move back to the start
 		data.move(-data.p)
@@ -304,7 +332,9 @@ impl @bmp_csec {
 
 		let pix_data = data.read(pix_data_len)
 
-		//TODO: test y flipped bmps
+		if @bmp_ihdr::COMPRESSIONS.."RLE4" == info_header.biCompression || @bmp_ihdr::COMPRESSIONS.."RLE8" == info_header.biCompression {
+			pix_data = rle_decompress(pix_data)
+		}
 
 		let read = []
 
@@ -313,7 +343,7 @@ impl @bmp_csec {
 
 		//Im sure theres a much better way of doing this lol
 		while !pix_data.is_eof() {
-			let bytes = pix_data.read(info_header.biTile[1] - padding).raw()
+			let bytes = pix_data.read(info_header.biTile[0] - padding).raw()
 			let b = []
 			
 			//1 bit monochrome / indexed BMP
@@ -333,7 +363,7 @@ impl @bmp_csec {
 				bytes = bytes.map((b) => b.to_bin()).flatten()
 
 				//1 nibble is 1 pixel
-				for i in 0..4..bytes.length - 4 {
+				for i in 0..4..bytes.length {
 					if i / 4 >= info_header.biWidth {
 						break
 					}
@@ -369,6 +399,7 @@ impl @bmp_csec {
 
 					//Indicates RGB 565
 					if info_header.biRGBAMask.length > 0 || info_header.biRGBMask.length > 0 {
+						//RGB 565 allocated 6 bits to green, instead of 5 and leaving 1 unused
 						green = to_8_bit(bytes.read(6).raw().binary_to_int())
 						red = to_8_bit(bytes.read(5).raw().binary_to_int())
 					}
@@ -384,14 +415,14 @@ impl @bmp_csec {
 			}
 			//24 bit true colour BMP
 			else if info_header.biBitCount == 24 {
-				for i in 0..3..bytes.length - 3 {
+				for i in 0..3..bytes.length {
 					//Convert into colour instances - format is BRG
 					b.push(@colour::new(bytes[i:i+3][2], bytes[i:i+3][1], bytes[i:i+3][0]))
 				}
 			}
 			//32 bit true colour BMP (RBG / RGBA)
 			else if info_header.biBitCount == 32 {
-				for i in 0..4..bytes.length - 4 {
+				for i in 0..4..bytes.length {
 					//Convert into colour instances - format is BRG
 					b.push(@colour::new(bytes[i:i+4][2], bytes[i:i+4][1], bytes[i:i+4][0], a=bytes[i:i+4][3]))
 				}
@@ -401,7 +432,10 @@ impl @bmp_csec {
 			pix_data.move(padding)
 		}
 
-		$.print(read)
+		//Flip the bitmap so the first element is the first (top left) pixel
+		if info_header.biDirection == 1 {
+			read = read.reverse()
+		}
 
 		return @bmp_csec::{
 			palette,
@@ -512,5 +546,3 @@ bmp_to_objects = (
 		_error("pixel_scale must be between 0.1 and 4!")
 	}
 }
-
-parse_bmp("16bit5551.bmp")
