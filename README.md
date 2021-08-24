@@ -54,7 +54,7 @@ Two objects are provided as arguments:
 Notes:
 - **The function MUST return: `@number` or `@group`**
 - If you are supplying a custom macro, `start_id_group` has to be set to a group that is *not* next free (ie: `1g`)
-- Groups are added starting in the bottom left and are added going upwards in the `Y`, then along the `X` axis.
+- Groups are added starting in the bottom left and going up in the `Y` axis.
 
 
 
