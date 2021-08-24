@@ -692,11 +692,7 @@ bmp_to_objects = (
 	}
 }
 
-bmp = parse_bmp("../1bitmono.bmp")
-
-bmp_to_objects(bmp, pixel_scale=2, mask_rgb=[0,0,0])
-
-// return {
-// 	parse_bmp,
-// 	bmp_to_objects,
-// }
+return {
+	parse_bmp,
+	bmp_to_objects,
+}
