@@ -1,5 +1,7 @@
 # spwn-bmp
-Converts BMP images to (pixel) objects using SPWN. Its recommended use is for helping with creating pixel art since creating with small / scaled down objects can be very difficult in the editor. Any size BMP is supported but large ones may be *very* slow.
+Converts BMP images to (pixel) objects using SPWN. Its recommended use is for helping with creating pixel art since creating with small / scaled down objects can be very difficult in the editor. Any size BMP is supported but large ones may be *very* slow (I recommend no larger than about 60x60 normally but smaller if you are increasing the pixel density).
+
+The best workaround would be split the BMP into smaller sections and join them together in the level.
 
 Any format of BMP should also be supported however some may cause some bugs to arise.
 
@@ -20,6 +22,10 @@ It exports two macros: `parse_bmp` and `bmp_to_objects`
 
 Returns: `@bmp`
 
+Notes:
+- The path is relative to the class itself so you will need to add `../../` to the beginning of the path so that it looks in the right directory.
+
+
 ### `bmp_to_objects`
 | Arguments | Type    | Comment                                     | Default                |
 |-----------|---------|---------------------------------------------|------------------------|
@@ -33,6 +39,7 @@ Returns: `@bmp`
 | use_hue_shift | `@bool` | Instead of using 1 unique colour for every pixel, use 1 colour and hue shift to get the right colour | `false` |
 | pixel_scale | `@number` | The scale of the individual pixels | `1` |
 | pixel_density | `@number` | The number of pixels placed per pixel in the image ** | `1` |
+| mask_rgb | `[@number]` | A mask that will remove a colour from the image. Provided in an array in the format: [`R`, `G`, `B`] | | 
 | show_glow | `@bool` | Enables/Disables glow on the pixels | `false` |
 
 
@@ -47,6 +54,7 @@ Two objects are provided as arguments:
 Notes:
 - **The function MUST return: `@number` or `@group`**
 - If you are supplying a custom macro, `start_id_group` has to be set to a group that is *not* next free (ie: `1g`)
+- Groups are added starting in the bottom left and are added going upwards in the `Y`, then along the `X` axis.
 
 
 

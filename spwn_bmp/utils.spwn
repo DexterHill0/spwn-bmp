@@ -1,5 +1,3 @@
-extract import "ascii.spwn"
-
 //enum-ish thingy
 //uses the range operator (..) to allow "indexing" of the enum
 type @enum
@@ -86,17 +84,10 @@ impl @array {
 		return self.reverse().reduce((acum, el) => (acum * 256) + el)
 	},
 
-	//Takes array of bytes and converts them to a string
-	bytes_to_str: (self) {
-		return "".join(self.map((i) => chr(i)))
-	},
-
 	binary_to_int: (self) {
 		let sum = 0
 		for i in 0..self.length {
-			if self[i] == 1 {
-				sum += 2 ^ i
-			}
+			sum += self[i] * (2 ^ i)
 		}
 		return sum
 	},
@@ -141,7 +132,7 @@ impl @number {
 		let v2 = val.to_bin(16)
 
 		for i in 0..v1.length {
-			v1[i] = (v1[i] as @bool) && (v2[i] as @bool)
+			v1[i] = ((v1[i] as @bool) && (v2[i] as @bool)) as @number
 		}
 
 		return v1.binary_to_int()
@@ -156,7 +147,7 @@ impl @inc_group {
 	},
 
 	group: (self) {
-		return (?g if self.pattern == @group else ?c) if self.is_next_free else (self.group as self.pattern)
+		return (?g if self.pattern == @group else ?c) if self.is_next_free else (self._group as self.pattern)
 	},
 
 	next: (self) {
@@ -176,20 +167,8 @@ impl @inc_group {
 	}
 }
 
-enumerate = (iterator, callback) {
-	let index = 0
-	let cont = true
-	while cont && index <= iterator.length - 1 {
-		end = () { cont = false }
-		callback(index, iterator[index], end)
-		index++
-	}
-}
-
-
 return {
 	data: @data,
 	enum: @enum,
 	inc_group: @inc_group,
-	enumerate,
 }

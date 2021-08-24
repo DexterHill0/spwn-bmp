@@ -2,7 +2,7 @@ extract obj_props
 extract import "utils.spwn"
 
 PIXEL_OBJ_ID = 472
-PIXEL_OBJ_WIDTH = 1.4
+PIXEL_OBJ_WIDTH = 1.37
 
 _error = (message) {
 	throw "[ERROR]: {}".fmt([message])
@@ -51,8 +51,8 @@ impl @colour {
 		let v1 = self.to_hsv()
 		let v2 = other.to_hsv()
 
-		s_offset = (v1[1] - v2[1]) / 100
-		v_offset = (v1[2] - v2[2]) / 100
+		s_offset = (v2[1] - v1[1]) / 100
+		v_offset = (v2[2] - v1[2]) / 100
 		h_offset = 360 - (v1[0] - v2[0])
 
 		return [h_offset, v_offset, s_offset]
@@ -76,7 +76,7 @@ impl @bmp_fhdr {
 
 		let file_header = data.read(@bmp_fhdr::SIZE)
 		
-		bfType = file_header.read(2).raw().bytes_to_str()
+		bfType = file_header.read(2).raw()
 		bfSize = file_header.read(4).raw().bytes_to_int()
 		
 		//Skips reserved
@@ -287,7 +287,8 @@ type @bmp_palette
 impl @bmp_palette {
 
 	get_colour: (self, index: @number) {
-		return self.colours[index]
+		rgb = self.colours[index]
+		return @colour::new(rgb[0], rgb[1], rgb[2])
 	},
 
 	new: (data: [@number], mode: @string) {
@@ -298,7 +299,7 @@ impl @bmp_palette {
 		for i in 0..len {
 			//Skip the 4th index since it's usually reserved
 			//It's in BGR order
-			colours.push(@colour::new(data[i*4+2], data[i*4+1], data[i*4]))
+			colours.push([data[i*4+2], data[i*4+1], data[i*4]])
 		}
 
 		return @bmp_palette::{
@@ -309,11 +310,10 @@ impl @bmp_palette {
 
 rle_decompress = (data) {
 	let decomp = []
-	let data = data.raw()
 	for i in 0..2..data.length {
 		decomp.push([].fill(data[i], data[i+1]))
 	}
-	return @data::new(decomp.flatten())
+	return decomp.flatten()
 }
 
 type @bmp_csec
@@ -332,7 +332,8 @@ impl @bmp_csec {
 				return @colour::new(col*255, col*255, col*255)
 			}
 
-			return self.read[y][x]
+			rgba = self.read[y][x]
+			return @colour::new(rgba[0], rgba[1], rgba[2], a=rgba[3])
 		}
 	},
 
@@ -380,24 +381,35 @@ impl @bmp_csec {
 		data.move(file_header.bfOffBits)
 
 		let pix_data = data.read(pix_data_len)
+		let pos = pix_data.p
+
+		pix_data = pix_data.raw()
 
 		if @bmp_ihdr::COMPRESSIONS.."RLE4" == info_header.biCompression || @bmp_ihdr::COMPRESSIONS.."RLE8" == info_header.biCompression {
 			pix_data = rle_decompress(pix_data)
 		}
 
 		let read = []
+		let bytes = null
+		let b = []
+
+		//Converts 5 bit RGB to 8 bit RGB
+		to_8_bit = (val) {
+			return (val * 255) / 31
+		}
 
 		let padding = $.floor(4 - ((info_header.biWidth * info_header.biBitCount / 8) % 4))
 		padding = padding if padding != 4 else 0
 
 		//Im sure theres a much better way of doing this lol
-		while !pix_data.is_eof() {
-			let bytes = pix_data.read(info_header.biTile[0] - padding).raw()
-			let b = []
-			
+		while pos < pix_data.length {
+			//The data class is great but continually creating new instances is actually quite slow so here it's better to do it manually
+			bytes = pix_data[pos : pos + (info_header.biTile[0] - padding)]
+			b.clear()
+
 			//1 bit monochrome / indexed BMP
 			if info_header.biBitCount == 1 {
-				bytes = bytes.map((b) => b.to_bin()).flatten()
+				bytes = bytes.map((b) => b.to_bin().reverse()).flatten()
 
 				//1 bit is 1 pixel
 				for i in 0..bytes.length {
@@ -416,7 +428,6 @@ impl @bmp_csec {
 					if i / 4 >= info_header.biWidth {
 						break
 					}
-					//to_bin will return in big endian format so we need to specify big endian when converting it back to an int
 					b.push(bytes[i:i+4].binary_to_int())
 				}
 			}
@@ -424,61 +435,46 @@ impl @bmp_csec {
 			else if info_header.biBitCount == 8 {
 				bytes = bytes.map((b) => b.to_bin())
 
-				//Custom enumerate function :)
-				enumerate(bytes, (i, byte, end) {
-					if i >= info_header.biWidth {
-						end()
-					}
+				//1 byte is 1 pixel
+				for byte in bytes {
 					b.push(byte.binary_to_int())
-				})
-
+				}
 			}
 			//16 bit true colour BMP (RGB555[1] / RGB565)
 			else if info_header.biBitCount == 16 {
-				bytes = @data::new(bytes.map((b) => b.to_bin()).flatten())
+				bytes = bytes.map((b) => b.to_bin()).flatten()
 
-				to_8_bit = (val) {
-					return (val * 255) / 31
-				}
-
+				//2 bytes is 1 pixel
 				for i in 0..(bytes.length / 16) {
-					blue = to_8_bit(bytes.read(5).raw().binary_to_int())
-					let green = null
-					let red = null
-
-					//Indicates RGB 565
+					data = bytes[i*16:i*16+16]
+					
 					if info_header.biRGBAMask.length > 0 || info_header.biRGBMask.length > 0 {
-						//RGB 565 allocated 6 bits to green, instead of 5 and leaving 1 unused
-						green = to_8_bit(bytes.read(6).raw().binary_to_int())
-						red = to_8_bit(bytes.read(5).raw().binary_to_int())
+						b.push([data[11:16], data[5:11], data[0:5]])
 					}
-					//RGB 555[1]
 					else {
-						green = to_8_bit(bytes.read(5).raw().binary_to_int())
-						red = to_8_bit(bytes.read(5).raw().binary_to_int())
-						bytes.move(1)
+						b.push([data[10:15], data[5:10], data[0:5]])
 					}
-
-					b.push(@colour::new(red, green, blue))
 				}
 			}
 			//24 bit true colour BMP
 			else if info_header.biBitCount == 24 {
+				//3 bytes is 1 pixel
 				for i in 0..3..bytes.length {
 					//Convert into colour instances - format is BRG
-					b.push(@colour::new(bytes[i:i+3][2], bytes[i:i+3][1], bytes[i:i+3][0]))
+					b.push([bytes[i:i+3][2], bytes[i:i+3][1], bytes[i:i+3][0], 255])
 				}
 			}
 			//32 bit true colour BMP (RBG / RGBA)
 			else if info_header.biBitCount == 32 {
+				//4 bytes is 1 pixel
 				for i in 0..4..bytes.length {
 					//Convert into colour instances - format is BRG
-					b.push(@colour::new(bytes[i:i+4][2], bytes[i:i+4][1], bytes[i:i+4][0], a=bytes[i:i+4][3]))
+					b.push([bytes[i:i+4][2], bytes[i:i+4][1], bytes[i:i+4][0], bytes[i:i+4][3]])
 				}
 			}
-
+		
+			pos += info_header.biTile[0]
 			read.push(b)
-			pix_data.move(padding)
 		}
 
 		//Flip the bitmap so the first element is the first (top left) pixel
@@ -496,7 +492,7 @@ impl @bmp_csec {
 
 type @bmp
 impl @bmp {
-	HEADER: "BM",
+	HEADER: [66, 77],
 
 	_parse: (self) {
 		file_header = @bmp_fhdr::new(self.raw)
@@ -579,6 +575,9 @@ bmp_to_objects = (
 	#[desc("The number of pixels placed per pixel in the image (must be a square number). Default is 1")]
 	pixel_density = 1,
 
+	#[desc("If any pixel's colour matches what is supplied in mask_rgb, the pixel is not added to the level. Must be in the form [R, G, B] (alpha is ignored)")]
+	mask_rgb = null,
+
 	#[desc("Enables/Disables glow on the pixels. Default is false")]
 	show_glow = false,
 ) {
@@ -596,7 +595,13 @@ bmp_to_objects = (
 
 	//If the square root is not the same as the floored sqaure root it means it wasnt a square number
 	if $.sqrt(pixel_density) != $.floor($.sqrt(pixel_density)) {
-		_error("pixel_density must be a square number! (4 -> 2 times large, 9 -> 3 times as large, 16...)")
+		_error("pixel_density must be a square number! (4 -> 2 times larger, 9 -> 3 times larger, 16...)")
+	}
+
+	let mask_rgb = mask_rgb
+
+	if mask_rgb != null {
+		mask_rgb = @colour::new(mask_rgb[0], mask_rgb[1], mask_rgb[2], 1)
 	}
 
 	let col_id = @inc_group::new(start_col_group)
@@ -609,8 +614,8 @@ bmp_to_objects = (
 		_error("group_factory cannot be used when start_id_group is ?g!")
 	}
 
-	//Default/Starting values if using hue shift
-	let pixel_col = bmp.pixel_at(0, 0)
+	//Use red as default colour
+	let pixel_col = @colour::new(255, 0, 0)
 	-> col_group.set(pixel_col.r, pixel_col.g, pixel_col.b, pixel_col.a, duration=0)
 
 	let hsv_string = ""
@@ -624,6 +629,8 @@ bmp_to_objects = (
 
 	let size = $.sqrt(pixel_density)
 
+	let col = null
+
 	for x in 0..bmp.ihdr.biWidth * size {
 		for y in 0..bmp.ihdr.biHeight * size {
 			//Need the x and y values mapped to the original image sizes so I can get the colours correctly
@@ -631,7 +638,8 @@ bmp_to_objects = (
 			raw_y = y.map(0, bmp.ihdr.biHeight * size, 0, bmp.ihdr.biHeight)
 
 			if !use_hue_shift {
-				pixel_col = bmp.pixel_at(raw_x, raw_y)
+				col = bmp.pixel_at(raw_x, raw_y)
+				pixel_col = col
 
 				col_id = col_id.next()
 				col_group = col_id.group()
@@ -639,12 +647,19 @@ bmp_to_objects = (
 				-> col_group.set(pixel_col.r, pixel_col.g, pixel_col.b, pixel_col.a, duration=0)
 			}
 			else {
-				shift = pixel_col.get_hsv_shift(bmp.pixel_at(raw_x, raw_y))
+				col = bmp.pixel_at(raw_x, raw_y)
+
+				shift = pixel_col.get_hsv_shift(col)
 				h_shift = shift[0]
 				v_shift = shift[1]
 				s_shift = shift[2]
 
 				hsv_string = "{}a{}a{}a1a1".fmt([h_shift, v_shift, s_shift])
+			}
+
+			//Ignore the pixel if the colours match
+			if mask_rgb != null && col.r == mask_rgb.r && col.g == mask_rgb.g && col.b == mask_rgb.b {
+				continue
 			}
 	
 			nx = (x * PIXEL_OBJ_WIDTH * pixel_scale) + start_x
@@ -652,32 +667,36 @@ bmp_to_objects = (
 
 			//Get the group
 			fac_group = group_factory({x, y, raw_x, raw_y}, {
-					bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, current_group: group_id._as_num()
-				}) as @group
+				bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, current_group: group_id._as_num()
+			}) as @group
 			
 			//Update with new group
 			group_id = @inc_group::new(fac_group)
 
 			object = obj {
-				OBJ_ID: PIXEL_OBJ_ID,
-				X: nx,
+				X: nx, 
 				Y: ny,
 				COLOR: col_group,
 				HVS: hsv_string if use_hue_shift else "",
-				HVS_ENABLED: use_hue_shift,
 				GROUPS: fac_group if add_groups else 0g,
+				OBJ_ID: PIXEL_OBJ_ID,
+				HVS_ENABLED: use_hue_shift,
 				DONT_FADE: true,
 				DONT_ENTER: true,
 				GLOW_DISABLED: !show_glow,
 				SCALING: pixel_scale,
-			}	
+			}
 
 			$.add(object)
 		}
 	}
 }
 
-return {
-	parse_bmp,
-	bmp_to_objects,
-}
+bmp = parse_bmp("../1bitmono.bmp")
+
+bmp_to_objects(bmp, pixel_scale=2, mask_rgb=[0,0,0])
+
+// return {
+// 	parse_bmp,
+// 	bmp_to_objects,
+// }
