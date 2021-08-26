@@ -51,9 +51,9 @@ impl @colour {
 		let v1 = self.to_hsv()
 		let v2 = other.to_hsv()
 
-		s_offset = (v2[1] - v1[1]) / 100
-		v_offset = (v2[2] - v1[2]) / 100
-		h_offset = 360 - (v1[0] - v2[0])
+		h_offset = $.max(v2[0] - v1[0], v1[0] - v2[0])
+		s_offset = $.min(v2[1] - v1[1], v1[1] - v2[1]) / 100
+		v_offset = $.min(v2[2] - v1[2], v1[2] - v2[2]) / 100
 
 		return [h_offset, v_offset, s_offset]
 	},
