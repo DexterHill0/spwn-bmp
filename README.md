@@ -44,7 +44,7 @@ Notes:
 | show_glow | `@bool` | Enables/Disables glow on the pixels | `false` |
 
 ### Pixel types
-![List of pixel types (`SM`, `MD`, `LG` + `CORNER` / `BLOCK`)](https://github.com/DexterHill0/spwn-bmp/tree/main/images/pixels.PNG?raw=true)
+![List of pixel types (`SM`, `MD`, `LG` + `CORNER` / `BLOCK`)](https://raw.githubusercontent.com/DexterHill0/spwn-bmp/main/images/pixels.PNG?raw=true)
 
 To specify a different pixel type, add:
 `pixel_type=spwnbmp.PIXELS.<type>`
