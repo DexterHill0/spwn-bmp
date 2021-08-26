@@ -3,4 +3,5 @@ let funcs = import "bmp.spwn"
 return {
 	parse_bmp: funcs.parse_bmp,
 	bmp_to_objects: funcs.bmp_to_objects,
+	PIXELS: funcs.PIXELS,
 }

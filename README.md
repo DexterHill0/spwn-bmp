@@ -32,6 +32,7 @@ Notes:
 | bmp       | `@bmp`    | The returned `bmp` class from `parse_bmp`   |                        |
 | start_x   | `@number` | Starting X offset for the pixels (from 0,0) | 5 blocks / 150 units   |
 | start_y   | `@number` | Starting Y offset for the pixels (from 0,0) | 50 blocks / 1500 units |
+| pixel_type | | The type of block to use as pixels. A list of all pixels is shown in the image below | `PIXELS.SM_CORNER` |
 | start_id_group | `@group` | Starting group for the objects | `?g` -> next free |
 | add_groups | `@bool` | Enables/Disables adding groups to all the pixels | `false` |
 | group_factory | `macro` | * | |
@@ -39,9 +40,15 @@ Notes:
 | use_hue_shift | `@bool` | Instead of using 1 unique colour for every pixel, use 1 colour and hue shift to get the right colour | `false` |
 | pixel_scale | `@number` | The scale of the individual pixels | `1` |
 | pixel_density | `@number` | The number of pixels placed per pixel in the image ** | `1` |
-| mask_rgb | `[@number]` | A mask that will remove a colour from the image. Provided in an array in the format: [`R`, `G`, `B`] | | 
+| mask_rgb | `[@number]` | A mask that will remove a colour from the image. Provided in an array in the format: [`R`, `G`, `B`] | |
 | show_glow | `@bool` | Enables/Disables glow on the pixels | `false` |
 
+### Pixel types
+![List of pixel types (`SM`, `MD`, `LG` + `CORNER` / `BLOCK`)](https://github.com/DexterHill0/spwn-bmp/blob/main/images/pixels.png?raw=true)
+
+To specify a different pixel type, add:
+`pixel_type=spwnbmp.PIXELS.<type>`
+as an argument to the `bmp_to_objects` macro.
 
 
 **\***:

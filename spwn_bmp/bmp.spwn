@@ -1,8 +1,15 @@
 extract obj_props
 extract import "utils.spwn"
 
-PIXEL_OBJ_ID = 472
-PIXEL_OBJ_WIDTH = 1.37
+PIXELS = {
+	//[ID, WIDTH]
+	SM_CORNER: [472, 1.37],
+	MD_CORNER: [1205, 2.9],
+	LG_CORNER: [1265, 5.5],
+	SM_BLOCK: [1194, 7.0],
+	MD_BLOCK: [1195, 14.5],
+	LG_BLOCK: [211, 30.0],
+}
 
 _error = (message) {
 	throw "[ERROR]: {}".fmt([message])
@@ -633,6 +640,9 @@ bmp_to_objects = (
 
 	let col = null
 
+	pixel_id = pixel_type[0]
+	pixel_width = pixel_type[1]
+
 	for x in 0..bmp.ihdr.biWidth * size {
 		for y in 0..bmp.ihdr.biHeight * size {
 			//Need the x and y values mapped to the original image sizes so I can get the colours correctly
@@ -664,8 +674,8 @@ bmp_to_objects = (
 				continue
 			}
 	
-			nx = (x * PIXEL_OBJ_WIDTH * pixel_scale) + start_x
-			ny = (y * PIXEL_OBJ_WIDTH * pixel_scale) + start_y
+			nx = (x * pixel_width * pixel_scale) + start_x
+			ny = (y * pixel_width * pixel_scale) + start_y
 
 			//Get the group
 			fac_group = group_factory({x, y, raw_x, raw_y}, {
@@ -683,7 +693,7 @@ bmp_to_objects = (
 				COLOR: col_group,
 				HVS: hsv_string if use_hue_shift else "",
 				GROUPS: fac_group if add_groups else 0g,
-				OBJ_ID: PIXEL_OBJ_ID,
+				OBJ_ID: pixel_id,
 				HVS_ENABLED: use_hue_shift,
 				DONT_FADE: true,
 				DONT_ENTER: true,
@@ -699,4 +709,5 @@ bmp_to_objects = (
 return {
 	parse_bmp,
 	bmp_to_objects,
+	PIXELS,
 }
