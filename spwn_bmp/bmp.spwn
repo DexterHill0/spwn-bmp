@@ -339,7 +339,12 @@ impl @bmp_csec {
 				return @colour::new(col*255, col*255, col*255)
 			}
 
-			rgba = self.read[y][x]
+			let rgba = self.read[y][x]
+
+			if rgba.length == 3 {
+				rgba.push(255) //Alpha channel
+			}
+
 			return @colour::new(rgba[0], rgba[1], rgba[2], a=rgba[3])
 		}
 	},
@@ -456,10 +461,10 @@ impl @bmp_csec {
 					data = bytes[i*16:i*16+16]
 					
 					if info_header.biRGBAMask.length > 0 || info_header.biRGBMask.length > 0 {
-						b.push([data[11:16], data[5:11], data[0:5]])
+						b.push([to_8_bit(data[11:16].binary_to_int()), to_8_bit(data[5:11].binary_to_int()), to_8_bit(data[0:5].binary_to_int())])
 					}
 					else {
-						b.push([data[10:15], data[5:10], data[0:5]])
+						b.push([to_8_bit(data[10:15].binary_to_int()), to_8_bit(data[5:10].binary_to_int()), to_8_bit(data[0:5].binary_to_int())])
 					}
 				}
 			}
@@ -581,7 +586,7 @@ bmp_to_objects = (
 	pixel_scale = 1,
 	#[desc("The number of pixels placed per pixel in the image (must be a square number). Default is 1")]
 	pixel_density = 1,
-	#[desc("The type of pixel object to use (default is PIXELS.SM_CORNER)")]
+	#[desc("The type of pixel object placed. Default is PIXELS.SM_CORNER")]
 	pixel_type=PIXELS.SM_CORNER,
 
 	#[desc("If any pixel's colour matches what is supplied in mask_rgb, the pixel is not added to the level. Must be in the form [R, G, B] (alpha is ignored)")]
