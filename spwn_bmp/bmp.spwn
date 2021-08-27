@@ -627,8 +627,6 @@ bmp_to_objects = (
 
 	let hsv_string = ""
 
-	is_custom_group_factory = group_factory != null
-
 	//Default group factory - just increments the group every time it's called
 	let group_factory = (_, __) {
 		id = group_id.group()
@@ -679,13 +677,8 @@ bmp_to_objects = (
 
 			//Get the group
 			fac_group = group_factory({x, y, raw_x, raw_y}, {
-				bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, current_group: group_id._as_num()
+				bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, start_group: group_id._as_num()
 			}) as @group
-			
-			//Update with new group if a custom factory is provided
-			if is_custom_group_factory {
-				group_id = @inc_group::new(fac_group)
-			}
 
 			object = obj {
 				X: nx, 
