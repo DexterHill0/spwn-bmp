@@ -56,7 +56,7 @@ as an argument to the `bmp_to_objects` macro.
 Two objects are provided as arguments:
 
 - arg[0] `{x, y, raw_x, raw_y}` -> positions of the pixels. `x` and `y` are different to `raw_x` and `raw_y` if `pixel_density` has been changed.
-- arg[1] `{bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, current_group}` -> extra data for whatever code runs within in the macro.
+- arg[1] `{bmp, start_x, start_y, start_id_group, pixel_scale, pixel_density, start_group}` -> extra data for whatever code runs within in the macro.
 
 Notes:
 - **The function MUST return: `@number` or `@group`**

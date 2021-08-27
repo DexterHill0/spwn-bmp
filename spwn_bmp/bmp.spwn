@@ -581,6 +581,8 @@ bmp_to_objects = (
 	pixel_scale = 1,
 	#[desc("The number of pixels placed per pixel in the image (must be a square number). Default is 1")]
 	pixel_density = 1,
+	#[desc("The type of pixel object to use (default is PIXELS.SM_CORNER)")]
+	pixel_type=PIXELS.SM_CORNER,
 
 	#[desc("If any pixel's colour matches what is supplied in mask_rgb, the pixel is not added to the level. Must be in the form [R, G, B] (alpha is ignored)")]
 	mask_rgb = null,
