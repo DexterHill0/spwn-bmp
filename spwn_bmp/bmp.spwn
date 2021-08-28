@@ -671,7 +671,7 @@ bmp_to_objects = (
 				v_shift = shift[1]
 				s_shift = shift[2]
 
-				hsv_string = "{}a{}a{}a1a1".fmt([h_shift, v_shift, s_shift])
+				hsv_string = "{}a{}a{}a1a1".fmt([h_shift, s_shift, v_shift])
 			}
 
 			//Ignore the pixel if the colours match
